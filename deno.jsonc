@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "strict": true
+  },
+  "imports": {
+    "xml": "https://deno.land/x/xml@6.0.4/mod.ts",
+    "windmill": "https://deno.land/x/windmill@v1.85.0/mod.ts"
+  }
+} 

@@ -1,0 +1,6 @@
+summary: ''
+display_name: grister_config_vars
+extra_perms:
+  u/autumn: true
+owners:
+  - u/autumn

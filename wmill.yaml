@@ -1,0 +1,10 @@
+defaultTs: bun
+includes:
+  - f/**
+excludes:
+  - "**/__init__.py"
+codebases: []
+skipVariables: false
+skipResources: true
+skipSecrets: true
+includeSchedules: false

@@ -1,0 +1,13 @@
+**/__pycache__/
+
+wmill-lock.yaml
+**/*.lock
+**/*.script.yaml
+**/*.meta.yaml
+**/*.resource.yaml
+
+.*
+!/.gitignore
+
+node_modules
+*.json*

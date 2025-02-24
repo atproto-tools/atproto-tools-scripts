@@ -409,8 +409,6 @@ class Collector:
                 ],
             )
 
-        #TODO for any sites with no a gh description but no main description, write an empty one to trigger the formula
-
         # TODO writing meta could happen here too. it's an exta round trip to grist but less data from bsky/forges
         # if self.write_meta:
             # from f.main.get_repos_data import main as fetch_stale_repos

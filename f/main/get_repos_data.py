@@ -1,6 +1,7 @@
 from enum import StrEnum
 from time import time
 from typing import Any, Iterable
+from urllib.parse import urlparse, urlunparse
 import requests
 import wmill
 import pprint
@@ -22,15 +23,37 @@ keyfields = {
 ref_field_names = {
     t.AUTHORS: "Authors_refs",
     rt.TOPICS: "topics",
-    rt.LICENSES: "licenseInfo",
-    rt.LANGUAGES: "primaryLanguage"
+    rt.LICENSES: "license",
+    rt.LANGUAGES: "language"
 }
+
 
 # boilerplate for basic functinality? in MY python??
 def batched(long_list: list, n=1):
     for ndx in range(0, len(long_list), n):
         yield long_list[ndx:ndx+n]
 
+
+gitea_field_key = { #thank u claude
+    "website": "homepageUrl",
+    "description": "description",
+    "updated_at": "updatedAt",
+    "archived": "isArchived",
+    "created_at": "createdAt",
+    "forks_count": "forkCount",
+    "stars_count": "stargazerCount",
+    "open_issues_count": "issues",  # GitHub has this nested under issues with state OPEN
+    "open_pr_counter": "pullRequests",  # GitHub has this nested under pullRequests with state OPEN
+    
+    # Topics
+    # "topics": "topics",  # GitHub has this nested under nodes
+    
+    # License
+    # "licenses": "license",  # GitHub has this as a single license under licenseInfo
+    
+    # Release info (partial match)
+    # "release_counter": "latestRelease",  # a simple counter doesn't seem useful
+}
 
 fragment = """
 fragment repoProperties on Repository {
@@ -100,8 +123,6 @@ headers = {
     "Content-Type": "application/json",
 }
 
-batch_size = 64 # 100 is the stated limit, but it still timed out server-side a fair bit. this seems to work better
-
 def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[str]) -> dict[kf, dict[str, Any]]:
     """
     fills in repo metadata to the Repos table. Quite slow - it reads/writes 3 additional tables (listed in the rt enum)
@@ -114,29 +135,8 @@ def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[str]) -> dict[kf, dict
     """
     if not repo_urls:
         return {}
-    all_responses: dict[str, dict[str, Any]] = {}
-    repos: list = [
-        (rmatch[1], rmatch[2])
-        for url in repo_urls
-        if (rmatch := re.search(r"https://github\.com/([^/]*)/([^/]*)/?$", url))
-    ]
-    for num_req, batch in enumerate(batched(repos, batch_size)): 
-        repos_query_batch = "\n".join(
-            template.format(id="r" + str(num_req * batch_size + i), owner=owner, repo=repo)
-            for i, (owner, repo) in enumerate(batch)
-        )
-        query = f"{fragment} {{{repos_query_batch} {rate_limit_info}}}"
-        response = requests.post(
-            "https://api.github.com/graphql", json={"query": query}, headers=headers
-        )
-        data = response.json()["data"]
-        pprint.pp(data.pop("rateLimit"))
-        if errors := data.pop("errors", None):
-            pprint.pp(errors)
-        all_responses |= data
-
+    records = {}
     ref_trackers = {}
-
     #TODO make these list requests async
     for table, keyfield in keyfields.items():
         if table == t.AUTHORS:
@@ -158,9 +158,60 @@ def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[str]) -> dict[kf, dict
                 tracker["new"].add(val)
         tracker["entries"].append(fields)
         fields[ref_field_names[dest]] = val
-        
-    records = {}
-    for (owner, repo), resp in zip(repos, all_responses.values()):
+
+    #TODO support other forges. forgejo? inquire about other popular ones
+    gitea_domains = ["gitea.com", "git.syui.ai"]  # TODO store this in a wmill variable or smth
+    gitea_urls = [
+        parsed_url
+        for url in repo_urls
+        if (parsed_url := urlparse(url)).netloc in gitea_domains
+        and len(parsed_url.path.strip("/").split("/")) == 2
+    ]
+    for i in gitea_urls:
+        url = urlunparse(i)
+        new_path = "/api/v1/repos" + i.path
+        endpoint = urlunparse(i._replace(path=new_path))
+        resp = requests.get(endpoint)
+        resp.raise_for_status()
+        r_json = resp.json()
+        # records[url] = {
+        #     gitea_field_key[field]: value for field, value in r_json
+        # }
+        out = {}
+        for gitea_field, grist_field in gitea_field_key.items():
+            if (val := r_json.get(gitea_field)) is not None:
+                out[grist_field] = val
+            # elif val == "language":
+            #     add_refs(out, rt.LANGUAGES, val)
+            #TODO figure out how to map the enums from the disabled fields in gitea_field_key from gitea to github
+            # for now we just get the string fields
+        records[url] = out
+    pprint.pprint(records)
+    
+    github_urls: list[tuple[str, str]] = [
+        (rmatch[1], rmatch[2])
+        for url in repo_urls
+        if (rmatch := re.search(r"https://github\.com/([^/]*)/([^/]*)/?$", url))
+    ]
+    
+    github_responses: dict[str, dict[str, Any]] = {}
+    batch_size = 64 # 100 is the stated limit, but it still timed out server-side a fair bit. this seems to work better
+    for num_req, batch in enumerate(batched(github_urls, batch_size)): 
+        repos_query_batch = "\n".join(
+            template.format(id="r" + str(num_req * batch_size + i), owner=owner, repo=repo)
+            for i, (owner, repo) in enumerate(batch)
+        )
+        query = f"{fragment} {{{repos_query_batch} {rate_limit_info}}}"
+        response = requests.post(
+            "https://api.github.com/graphql", json={"query": query}, headers=headers
+        )
+        data = response.json()["data"]
+        pprint.pp(data.pop("rateLimit"))
+        if errors := data.pop("errors", None):
+            pprint.pp(errors)
+        github_responses |= data
+
+    for (owner, repo), resp in zip(github_urls, github_responses.values()):
         url = f"https://github.com/{owner}/{repo}"
         out: dict[str, Any] = {
             mf.POLLED: int(time())
@@ -237,16 +288,15 @@ def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[str]) -> dict[kf, dict
 
 def update_all_repos(g: CustomGrister | None = None):
     g = g or ATPTGrister(fetch_authors=True)
-    #TODO support other forges. sample gitea rest api endpoint: https://git.syui.ai/api/v1/repos/ai/bot
     #TODO convert to sql query
     all_repos = [
         i[kf.NORMAL_URL]
         for i in g.list_records("Repos")[1]
-        if (
-            i.get("github_path")
+        if ( True
+            # i.get("github_path")
             # and not i.get(mf.INACTIVE)
             # and not i.get("isArchived")
-            and check_stale(i.get(mf.POLLED))
+            # and check_stale(i.get(mf.POLLED))
         )
     ]
     records = fetch_repo_data(g, all_repos)

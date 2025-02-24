@@ -1,7 +1,7 @@
 from typing import Any, cast
 import wmill
 from f.main.ATPTGrister import normalize
-from f.main.Collector import Collector, gf, kf, ef
+from f.main.Collector import Collector, kf, ef
 
 #TODO other sanitization? idk what the risks are
 def clean_url(url: str ) -> kf:
@@ -16,8 +16,7 @@ this link includes a unique identifier- you (or anyone you share it with) can us
 """
 
 #TODO for now, only one URL per submission, and it must be a new url. adding a url to an existing author/repo is not allowed. if we can figure out how to set a cookie from the web form, we can allow adding multiple thin (since it allows ownership)
-#TODO once tags are unified, add a tag selector (via cached net request in wmill)
-#TODO add submitter
+#TODO #blocked once tags are unified, add a tag selector (via cached net request in wmill)
 def main(url: str, name: str = "", desc: str = "", repo: str = "", author: str = ""): #, lexicon: DynSelect_lexicon_select = ''):
     url, repo = clean_url(url), clean_url(repo)
     author = cast(kf, author)

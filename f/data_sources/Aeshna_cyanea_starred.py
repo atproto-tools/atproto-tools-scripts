@@ -14,16 +14,6 @@ query getList($after: String) {
             url
             homepageUrl
             description
-            owner {
-              ... on User {
-                socialAccounts(first: 20) {
-                  nodes {
-                    url
-                    provider
-                  }
-                }
-              }
-            }
           }
         }
         pageInfo {
@@ -44,7 +34,7 @@ query getList($after: String) {
 
 
 def main():
-    c = Collector("Aeshna_cyanea_starred", fields=[ef.DESC], fetch_authors=True)
+    c = Collector("Aeshna_cyanea_starred", fields=[ef.DESC])
 
     headers = {
         "Authorization": f"Bearer {wmill.get_variable('u/autumn/github_key')}",
@@ -73,10 +63,6 @@ def main():
             }
             if desc := node["description"]:
                 entry[ef.DESC] = desc
-            if accounts := node.get("socialAccounts", {}).get("nodes"):
-                bluesky_account = next((acc["url"] for acc in accounts if acc["provider"] == "BLUESKY"), None)
-                if bluesky_account: #TODO some people have multiple bsky handles listed. handle this somehow idk
-                    entry[ef.AUTHOR] = bluesky_account
             c.add_site(entry)
             if not after_cursor:
                 break

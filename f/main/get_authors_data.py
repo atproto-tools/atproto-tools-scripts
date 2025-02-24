@@ -54,7 +54,7 @@ def fetch_authors(authors: Iterable[str]) -> dict[kf, dict[str, Any]]:
 def main():
     g = ATPTGrister(fetch_authors=False)
     stale_authors = [
-        fields for fields in
+        fields[kf.DID] for fields in
         g.list_records(t.AUTHORS)[1]
         if check_stale(fields.get(mf.POLLED))
     ]

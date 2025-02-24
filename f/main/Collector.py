@@ -3,7 +3,7 @@ from itertools import zip_longest
 import re
 from typing import Iterable, Any, cast
 from pprint import pformat
-from f.main.ATPTGrister import ATPTGrister, t, gf, kf, make_timestamp, normalize
+from f.main.ATPTGrister import ATPTGrister, check_stale, mf, t, gf, kf, make_timestamp, normalize
 import feedparser
 
 class ef(StrEnum):  # would have used an enum but it has "name" attr reserved
@@ -194,7 +194,7 @@ class Collector:
     def add_source(self, table: dict[kf, Any], key: kf):
         return add_one_missing(table.get(key, {}).get(tf.SOURCES) or ["L"], self._source_id)
 
-    def add_repo_site(self, normalized_site: kf, repo_url: str) -> tuple[str, kf]:
+    def add_repo_site(self, repo_url: str, normalized_site: kf) -> tuple[str, kf]:
         normal_repo_url = normalize(repo_url)
         normal_repo_url = self._alt_urls.get(normal_repo_url, normal_repo_url)
         site = normalized_site
@@ -382,10 +382,17 @@ class Collector:
         if self.write_meta:
             from f.main.get_repos_data import fetch_repo_data
             from f.main.get_authors_data import fetch_authors
-            repos_metadata = fetch_repo_data(self.g, list(url for i in self.repos_records.keys() if (url := check_repo(i))))
+            repos_metadata = fetch_repo_data(
+                self.g,
+                list(url for i in self.repos_records.keys() if (url := check_repo(i)) and not check_stale(self.repos.get(i, {}).get(mf.POLLED))),
+            )
             for url, fields in repos_metadata.items():
                 self.repos_records[url][gf.FIELDS] |= fields
-            authors_metadata = fetch_authors(did for did in self.authors_records.keys() if did not in self.authors)
+            authors_metadata = fetch_authors(
+                did
+                for did in self.authors_records.keys()
+                if check_stale(self.authors[did].get(mf.POLLED))
+            )
             for did, fields in authors_metadata.items():
                 self.authors_records[did][gf.FIELDS] |= fields
 

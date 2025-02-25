@@ -21,7 +21,7 @@ keyfields = {
 }
 
 ref_field_names = {
-    t.AUTHORS: "Authors_refs",
+    t.AUTHORS: "Authors",
     rt.TOPICS: "topics",
     rt.LICENSES: "license",
     rt.LANGUAGES: "language"
@@ -44,11 +44,13 @@ gitea_field_key = { #thank u claude
     "stars_count": "stargazerCount",
     "open_issues_count": "issues",  # GitHub has this nested under issues with state OPEN
     "open_pr_counter": "pullRequests",  # GitHub has this nested under pullRequests with state OPEN
-    
+    "language": ref_field_names[rt.LANGUAGES]
+    # for now we just make a gross assumption that github language names map neatly to gitea names
+
     # Topics
     # "topics": "topics",  # GitHub has this nested under nodes
     
-    # License
+    # License #TODO idk how to merge gitea and github licenses
     # "licenses": "license",  # GitHub has this as a single license under licenseInfo
     
     # Release info (partial match)
@@ -59,19 +61,18 @@ fragment = """
 fragment repoProperties on Repository {
   homepageUrl
   description
-  updatedAt
   isArchived
   latestRelease {
     updatedAt
     name
   }
-  # defaultBranchRef {
-  #     target {
-  #       ... on Commit {
-  #         committedDate
-  #       }
-  #     }
-  #   }
+  defaultBranchRef {
+      target {
+        ... on Commit {
+          committedDate
+        }
+      }
+    }
   owner {
     ... on User {
       sponsorsListing {
@@ -177,14 +178,10 @@ def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[str]) -> dict[kf, dict
         # records[url] = {
         #     gitea_field_key[field]: value for field, value in r_json
         # }
-        out = {}
+        out = {mf.POLLED: int(time())}
         for gitea_field, grist_field in gitea_field_key.items():
             if (val := r_json.get(gitea_field)) is not None:
                 out[grist_field] = val
-            # elif val == "language":
-            #     add_refs(out, rt.LANGUAGES, val)
-            #TODO figure out how to map the enums from the disabled fields in gitea_field_key from gitea to github
-            # for now we just get the string fields
         records[url] = out
     pprint.pprint(records)
     
@@ -193,7 +190,6 @@ def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[str]) -> dict[kf, dict
         for url in repo_urls
         if (rmatch := re.search(r"https://github\.com/([^/]*)/([^/]*)/?$", url))
     ]
-    
     github_responses: dict[str, dict[str, Any]] = {}
     batch_size = 64 # 100 is the stated limit, but it still timed out server-side a fair bit. this seems to work better
     for num_req, batch in enumerate(batched(github_urls, batch_size)): 
@@ -227,8 +223,8 @@ def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[str]) -> dict[kf, dict
                             out[field] = v
                         case "isArchived":
                             out[field] = v
-                        case "updatedAt":
-                            out[field] = make_timestamp(v)
+                        case "defaultBranchRef":
+                            out["updatedAt"] = make_timestamp(v["target"]["committedDate"])
                         case "latestRelease":
                             out |= {"last_release_date": v["updatedAt"], "latest_version": v["name"]}
                         case "owner": #TODO replace this with top X contributors. mb calculate X by whatever number is repsonsile for >80% of commits/prs
@@ -296,11 +292,12 @@ def update_all_repos(g: CustomGrister | None = None):
             # i.get("github_path")
             # and not i.get(mf.INACTIVE)
             # and not i.get("isArchived")
-            # and check_stale(i.get(mf.POLLED))
+            and check_stale(i.get(mf.POLLED))
         )
     ]
     records = fetch_repo_data(g, all_repos)
     assert records
+    print(len(str(records)))
     g.add_update_records(t.REPOS, list(
         {
             gf.KEY: {kf.NORMAL_URL: url},

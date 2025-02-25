@@ -121,7 +121,7 @@ class Collector:
         
         self.display_fields: list[str] = [
             i for i in self._fields
-            if not i.startswith(self._prefix + "_") or i.endswith("_refs")
+            if not i.startswith(self._prefix + "_") or i not in t.__members__.values()
         ] + [ef.URL]
         """
         fields to include in output table (prefixed with source name). passed into self.output() by default .\n
@@ -310,7 +310,7 @@ class Collector:
     def output(self, display_fields: list[str] = [], dry_run: bool = False) -> dict[str, list[Any]]:
         """write to the grist db and make a pretty json object for output into windmill.
         Args:
-            display_fields (list[str], optional): fields to display in output. values can be "url" and the keys of self._field_key. Defaults the order fields were given in the constructor, with tag_refs and url added in last. Fields starting with _ are hidden by default.
+            display_fields (list[str], optional): fields to display in output. values can be "url" and the keys of self._field_key. Defaults the order fields were given in the constructor, with tags and url added in last. Fields starting with _ are hidden by default.
 
         Returns:
             dict[str, list[Any]]: [description of output format](https://www.windmill.dev/docs/core_concepts/rich_display_rendering#render-all)

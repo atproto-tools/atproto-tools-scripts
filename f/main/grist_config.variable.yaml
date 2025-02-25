@@ -5,7 +5,5 @@ value: |-
     "GRIST_WORKSPACE_ID": "79871",
     "GRIST_DOC_ID": "p2SiVPSGqbi8oCHS24PnMj",
     "GRIST_RAISE_ERROR": "N",
-    "singleTableName": "Sites",
-    "useSingleTable": "True"
   }
 is_secret: false

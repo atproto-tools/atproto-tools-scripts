@@ -13,6 +13,7 @@ utc = ZoneInfo("UTC")
 class t(StrEnum):
     """atproto-tools table names"""
     SOURCES = "Data_Sources"
+    LEXICONs = "Lexicons"
     SITES = "Sites"
     REPOS = "Repos"
     AUTHORS = "Authors"
@@ -47,9 +48,9 @@ def normalize(url: str) -> kf:
     ])
     netloc = parsed.netloc.lower()
     netloc = netloc[4:] if netloc.startswith("www.") else netloc
-    path = re.match(r"(.*?)(/about)?/?$",parsed.path)[1] #type: ignore
+    path = re.match(r"(.*?)(/about)?/?$",parsed.path)[1] #type: ignore (preference)
     scheme = "https" if parsed.scheme == "http" else parsed.scheme
-    return urlunparse(parsed._replace(netloc=netloc, path=path, scheme=scheme, query=query)) #type: ignore
+    return urlunparse(parsed._replace(netloc=netloc, path=path, scheme=scheme, query=query)) #type: ignore (preference)
 
 #TODO maybe set up converter functions instead
 def make_timestamp(timestamp: str | int | float):

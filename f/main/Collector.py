@@ -24,11 +24,8 @@ class ef(StrEnum):  # would have used an enum but it has "name" attr reserved
 class tf(StrEnum):
     """names of table fields"""
     URL = "url" # if urls differ, we override the old one. but we find what to replace by the normalized form
-    SOURCES = "sources"
-    SITES = "Sites_refs"
     HOME = "homepageUrl"
     ALT_URLS = "alt_urls"
-    LEXICONs = "Lexicon_community_tags"
 
 #TODO implement lexicons as a default field
 
@@ -85,9 +82,7 @@ class Collector:
             pass
         self._source_id = source_record["id"]
         self._source_label = source_record["label"]
-        """prefixed default field names, passed to output"""
         self._fields: list[str] = [self._prefix + i for i in fields]
-        """user-defined fields in the output table. passed to self._make_meta_table"""
         self._df = {i: self._prefix + i for i in [ef.NAME, ef.DESC, ef.TAGS, ef.RATING]}
         self.sites_records: dict[kf, record] = {}
         self.authors_records: dict[kf, record] = {}
@@ -192,7 +187,7 @@ class Collector:
             print(f"\nDuplicate for {key}")
 
     def add_source(self, table: dict[kf, Any], key: kf):
-        return add_one_missing(table.get(key, {}).get(tf.SOURCES) or ["L"], self._source_id)
+        return add_one_missing(table.get(key, {}).get(t.SOURCES) or ["L"], self._source_id)
 
     def add_repo_site(self, repo_url: str, normalized_site: kf) -> tuple[str, kf]:
         normal_repo_url = normalize(repo_url)
@@ -206,13 +201,13 @@ class Collector:
 
                 site, normalized_site = matched_repo[tf.HOME], matched_repo[kf.NORMAL_HOME]
         if repo_record := self.repos_records.get(normal_repo_url):
-            add_one_missing(repo_record[gf.FIELDS][tf.SITES], normalized_site)
+            add_one_missing(repo_record[gf.FIELDS][t.SITES], normalized_site)
         else:
             self.repos_records[normal_repo_url] = {
                 gf.KEY: {kf.NORMAL_URL: normal_repo_url},
                 gf.FIELDS: {
-                    tf.SITES: [normalized_site], #converted to proper ref after writing and re-fetching sites
-                    tf.SOURCES: self.add_source(self.repos, normal_repo_url),
+                    t.SITES: [normalized_site], #converted to proper ref after writing and re-fetching sites
+                    t.SOURCES: self.add_source(self.repos, normal_repo_url),
                     tf.URL: repo_url
                 }
             }
@@ -226,11 +221,11 @@ class Collector:
             return
         
         if author_record := self.authors_records.get(did):
-            add_one_missing(author_record[gf.FIELDS][tf.SITES], normal_url)
+            add_one_missing(author_record[gf.FIELDS][t.SITES], normal_url)
         else:
             rec = {gf.KEY: {kf.DID: did}, gf.FIELDS: {
-                tf.SITES: [normal_url],
-                tf.SOURCES: self.add_source(self.authors, did),
+                t.SITES: [normal_url],
+                t.SOURCES: self.add_source(self.authors, did),
             }}
             if handle := self.authors[did].get(kf.HANDLE):
                 rec[gf.FIELDS][kf.HANDLE] = handle
@@ -289,7 +284,7 @@ class Collector:
                 )
             old_fields |= out_fields
         else:
-            out_fields[tf.SOURCES] = self.add_source(self.sites, normalized_site)
+            out_fields[t.SOURCES] = self.add_source(self.sites, normalized_site)
             self.sites_records[normalized_site] = out
         return normalized_site, out
 
@@ -300,12 +295,12 @@ class Collector:
             return []
         if table_id != t.SITES:
             for key, record in records.items():
-                dest = entries.get(key, {}).get(tf.SITES) or ["L"]
-                source = [self.sites[i]["id"] for i in record[gf.FIELDS][tf.SITES]]
+                dest = entries.get(key, {}).get(t.SITES) or ["L"]
+                source = [self.sites[i]["id"] for i in record[gf.FIELDS][t.SITES]]
                 if any(a != b for a, b in zip_longest(source, dest)):
                 # if source and source != dest:
-                    record[gf.FIELDS][tf.SITES] = add_missing(dest, source)
-        current_entries = {i for i,v in entries.items() if self._source_id in (v.get(tf.SOURCES) or [])}
+                    record[gf.FIELDS][t.SITES] = add_missing(dest, source)
+        current_entries = {i for i,v in entries.items() if self._source_id in (v.get(t.SOURCES) or [])}
         if deleted_entries := current_entries - records.keys():
             print(f"{table_id} not present in live {self._source_label}:\n{deleted_entries}")
         out = list(records.values())
@@ -384,7 +379,7 @@ class Collector:
             from f.main.get_authors_data import fetch_authors
             repos_metadata = fetch_repo_data(
                 self.g,
-                list(url for i in self.repos_records.keys() if (url := check_repo(i)) and not check_stale(self.repos.get(i, {}).get(mf.POLLED))),
+                list(url for i in self.repos_records.keys() if (url := check_repo(i)) and check_stale(self.repos.get(i, {}).get(mf.POLLED))),
             )
             for url, fields in repos_metadata.items():
                 self.repos_records[url][gf.FIELDS] |= fields

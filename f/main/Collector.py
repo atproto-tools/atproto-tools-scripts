@@ -72,7 +72,6 @@ class Collector:
         self._source_name = source_name
         self._prefix = source_name + "_"
         sources = self.g.list_records(t.SOURCES)[1]
-        self._source_urls = {}
         source_record = next(i for i in sources if i["source_name"] == source_name)
         self.last_update_timestamp: int = source_record.get("last_update_timestamp") or 0
         self.current_update_timestamp: int = 0
@@ -246,7 +245,7 @@ class Collector:
                 og_url = normalized_site = redirect
             out_fields[ef.URL] = og_url
             if repo := entry.pop(ef.REPO, None):
-                out_fields[ef.URL], normalized_site = self.add_repo_site(normalized_site, repo)
+                out_fields[ef.URL], normalized_site = self.add_repo_site(repo, normalized_site)
             for field, value in entry.items():
                 match field:
                     case ef.TAGS:

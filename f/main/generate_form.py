@@ -63,7 +63,7 @@ def main():
                 "title": "Lexicon",
                 "default": None,
                 "Noneable": True,
-                "enumLabels": {lex_num: lex_name for lex_name, lex_num in lex._member_map_.items()},
+                "enumLabels": {lex_num: lex_name.lower() for lex_name, lex_num in lex._member_map_.items()},
                 "enum": list(lex._member_map_.values()),
                 "description": ""
             }

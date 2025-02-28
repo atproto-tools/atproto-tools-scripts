@@ -160,7 +160,7 @@ def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[str]) -> dict[kf, dict
         tracker["entries"].append(fields)
         fields[ref_field_names[dest]] = val
 
-    #TODO support other forges. forgejo? inquire about other popular ones
+    #TODO support other forges. forgejo? inquire about other popular ones. Gitlab doesn't seem to have a public api at all?
     gitea_domains = ["gitea.com", "git.syui.ai"]  # TODO store this in a wmill variable or smth
     gitea_urls = [
         parsed_url
@@ -183,7 +183,6 @@ def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[str]) -> dict[kf, dict
             if (val := r_json.get(gitea_field)) is not None:
                 out[grist_field] = val
         records[url] = out
-    pprint.pprint(records)
     
     github_urls: list[tuple[str, str]] = [
         (rmatch[1], rmatch[2])

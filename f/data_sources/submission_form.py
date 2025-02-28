@@ -20,7 +20,7 @@ this link includes a unique identifier- you (or anyone you share it with) can us
 submissions_field = "submissions"
 #TODO for now, only one URL per submission, and it must be a new url. if we can figure out how to set a cookie from the web form, we can allow edits (since it allows ownership)
 #TODO #blocked once tags are unified, add a tag selector (via cached net request in wmill)
-def main(url: str | None, name: str | None = None, desc: str | None = None, repo: str | None = None, author: str | None = None):
+def main(url: str | None, name: str | None = None, desc: str | None = None, repo: str | None = None, author: str | None = None, lexicon: str | None = None):
     c = Collector("Submission_form", fields = [ef.NAME, ef.DESC, submissions_field], add_repos=True, write_meta=True, fetch_authors=True)
     simple_log("collector init")
     c.g.update_config({'GRIST_API_KEY': wmill.get_variable(path="u/autumn/grist_form_key")})
@@ -37,6 +37,7 @@ def main(url: str | None, name: str | None = None, desc: str | None = None, repo
                 ef.DESC: desc,
                 ef.REPO: repo,
                 ef.AUTHOR: author,
+                ef.LEXICON: lexicon,
             })
         else:
             old_record: dict = c.sites[url]
@@ -48,6 +49,8 @@ def main(url: str | None, name: str | None = None, desc: str | None = None, repo
                 ef.NAME: old_record.get("Computed_Name") or name,
                 ef.DESC: old_record.get("Computed_Description") or desc,
             }
+            if lexicon and not old_record.get(t.LEXICONS):
+                new_record[ef.LEXICON] = lexicon
             if repo and not old_record.get(t.REPOS):
                 new_record[ef.REPO] = repo
             if author and not old_record.get(t.AUTHORS):

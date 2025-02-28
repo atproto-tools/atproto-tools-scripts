@@ -4,6 +4,6 @@ value: |-
     "GRIST_TEAM_SITE": "atproto-tools",
     "GRIST_WORKSPACE_ID": "79871",
     "GRIST_DOC_ID": "p2SiVPSGqbi8oCHS24PnMj",
-    "GRIST_RAISE_ERROR": "N",
+    "GRIST_RAISE_ERROR": "N"
   }
 is_secret: false

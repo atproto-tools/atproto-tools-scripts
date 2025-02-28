@@ -11,6 +11,7 @@ class ef(StrEnum):  # would have used an enum but it has "name" attr reserved
     entry field names that have special handling, taken as input keys in FieldCollector.add_site()\n
     values- name, desc, tags, rating, url, repo, author.
     first 4 are source-specific and prefixed with source_name in the output
+    ef.LEXICONS field value should be a `lex` enum member or array of such
     """
     NAME = "name"
     DESC = "description"
@@ -20,6 +21,7 @@ class ef(StrEnum):  # would have used an enum but it has "name" attr reserved
     URL = "url"
     REPO = "repo"
     AUTHOR = "author" # must be an atprotoef = EntryFields() did or handle
+    LEXICONS = "lexicons"
 
 class tf(StrEnum):
     """names of table fields"""
@@ -27,7 +29,20 @@ class tf(StrEnum):
     HOME = "homepageUrl"
     ALT_URLS = "alt_urls"
 
-#TODO implement lexicons as a default field
+#i guess they have to be maintained manually. keep this enum in sync with https://atproto-tools.getgrist.com/p2SiVPSGqbi8/main-list/p/27, use "enum expression" column
+class lex(StrEnum):
+    WHTWND = '1'
+    SMOKE_SIGNAL = '2'
+    FRONTPAGE = '3'
+    LINKAT = '4'
+    RECIPE_EXCHANGE = '5'
+    SKYLIGHTS = '6'
+    PICOSKY = '7'
+    PINKSEA = '8'
+    STATUSPHERE = '9'
+    ATFILE = '10'
+    BLUESKY = '11'
+    UNIVERSAL = '12'
 
 record = dict[gf, dict[str, Any]]
 
@@ -257,6 +272,12 @@ class Collector:
                             out_fields[self._og_tag_field] = value
                     case ef.AUTHOR:
                         self.add_author_site(value, normalized_site)
+                    case ef.LEXICONS:
+                            out_fields[ef.LEXICONS] = self.sites.get(normalized_site, {}).get(ef.LEXICONS) or ["L"]
+                            if isinstance(field, str):
+                                add_one_missing(out_fields[ef.LEXICONS], value)
+                            else:
+                                add_missing(out_fields[ef.LEXICONS], value)
                     case _:
                         out_fields[self._prefix + field] = value
         else:
@@ -281,6 +302,8 @@ class Collector:
                     out_fields.get(self._df[ef.RATING], 0),
                     old_rating
                 )
+            if old_lexicons := old_fields.get(ef.LEXICONS):
+                add_missing(out_fields[ef.LEXICONS], old_lexicons)
             old_fields |= out_fields
         else:
             out_fields[t.SOURCES] = self.add_source(self.sites, normalized_site)

@@ -166,7 +166,7 @@ value:
             fields: {}
             fieldType: schema
             hideRefreshButton: true
-            recomputeOnInputChanged: true
+            recomputeOnInputChanged: false
             runnable:
               type: runnableByPath
               name: f/main/generate_form

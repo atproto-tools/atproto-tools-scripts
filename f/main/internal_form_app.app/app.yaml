@@ -165,7 +165,7 @@ value:
             expr: ''
             fields: {}
             fieldType: schema
-            hideRefreshButton: false
+            hideRefreshButton: true
             recomputeOnInputChanged: true
             runnable:
               type: runnableByPath

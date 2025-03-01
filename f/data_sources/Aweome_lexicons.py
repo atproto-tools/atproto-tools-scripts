@@ -1,5 +1,6 @@
+from typing import Any
 import requests
-from f.main.Collector import Collector, ef
+from f.main.Collector import Collector, ef, t
 import mistune
 
 def render_nodes(nodes):
@@ -16,15 +17,17 @@ def render_nodes(nodes):
 get_tree = mistune.create_markdown(renderer=None)
 
 
+# the lexicons table now only be manually updated (and kept in sync with the lex enum in f.main.Collector). this file kept around mostly to crawl the reference app metadata
 def main():
-    c = Collector("Lexicon_community", [ef.TAGS], fetch_authors=True, add_repos=True)
+    c = Collector("Awesome_lexicons", [ef.TAGS], fetch_authors=True, add_repos=True)
+    lexicons = {entry["label"]: entry for entry  in c.g.list_records("Awesome_lexicons")[1]}
     md = get_tree(
         requests.get(
             "https://raw.githubusercontent.com/lexicon-community/awesome-lexicons/refs/heads/main/README.md"
         ).text,
     )
     list_start = next(i for i, node in enumerate(md) if node["type"] == "heading" and node["children"][0]["raw"] == "Lexicons") # type: ignore
-    lexicons = {}
+    lexicons_entries = {}
     lex_name = ""
     for node in md[list_start + 1:]:
         normal_app_url = ""
@@ -33,7 +36,10 @@ def main():
             lex_name = node["children"][0]["raw"]
         if node["type"] == "list":
             fields = node["children"]
-            lex_fields = lexicons[lex_name] = {}
+            lex_fields: dict[str, Any] = {
+                "awesome_list_link": f"[{lex_name}](https://github.com/lexicon-community/awesome-lexicons?tab=readme-ov-file#{lex_name.replace(" ", "-").lower()})"
+            }
+            lexicons_entries[lex_name] = lex_fields
             for field in fields:
                 block = field['children'][0]['children']
                 if block[0]["raw"].startswith('Devs'):
@@ -55,18 +61,19 @@ def main():
                     normal_app_url, _ = c.add_site({
                         ef.URL: app_url,
                         ef.TAGS: [lex_name],
+                        ef.LEXICONS: lexicons[lex_name]["id"]
                     })
-                
+
                 elif block[0]["raw"].lower().startswith('bluesky account'):
                     site_author = block[1]['attrs']['url']
                     if normal_app_url:
                         c.add_author_site(site_author, normal_app_url) #type: ignore - app always listed before bluesky account
                     lex_fields["bluesky_account"] = site_author
     c.g.write_authors()
-    for lex in lexicons.values():
-        if "authors" in lex:
-            lex["authors"] = ["L", *(c.g.authors_lookup[author]["id"] for author in lex["authors"])]
-    c.make_tag_key(lexicons)
+    for lexicons in lexicons_entries.values():
+        if "authors" in lexicons:
+            lexicons["authors"] = ["L", *(c.g.authors_lookup[author]["id"] for author in lexicons["authors"])]
+    c.g.add_update_records(t.LEXICONS)
     c.output()
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ utc = ZoneInfo("UTC")
 class t(StrEnum):
     """atproto-tools table names"""
     SOURCES = "Data_Sources"
-    LEXICONs = "Lexicons"
+    LEXICONS = "Lexicons"
     SITES = "Sites"
     REPOS = "Repos"
     AUTHORS = "Authors"

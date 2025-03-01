@@ -273,11 +273,11 @@ class Collector:
                     case ef.AUTHOR:
                         self.add_author_site(value, normalized_site)
                     case ef.LEXICONS:
-                            out_fields[ef.LEXICONS] = self.sites.get(normalized_site, {}).get(ef.LEXICONS) or ["L"]
+                            out_fields[t.LEXICONS] = self.sites.get(normalized_site, {}).get(t.LEXICONS) or ["L"]
                             if isinstance(field, str):
-                                add_one_missing(out_fields[ef.LEXICONS], value)
+                                add_one_missing(out_fields[t.LEXICONS], value)
                             else:
-                                add_missing(out_fields[ef.LEXICONS], value)
+                                add_missing(out_fields[t.LEXICONS], value)
                     case _:
                         out_fields[self._prefix + field] = value
         else:

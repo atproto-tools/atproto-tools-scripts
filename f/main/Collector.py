@@ -5,6 +5,7 @@ from typing import Iterable, Any, cast
 from pprint import pformat
 from f.main.ATPTGrister import ATPTGrister, check_stale, mf, t, gf, kf, make_timestamp, normalize
 import feedparser
+from f.main.fetch_site_meta import fetch_site_meta
 
 class ef(StrEnum):  # would have used an enum but it has "name" attr reserved
     """
@@ -282,9 +283,15 @@ class Collector:
                         out_fields[self._prefix + field] = value
         else:
             entry = cast(kf, entry)
-            out_fields[ef.URL] = self._alt_urls.get(entry, entry)
+            out_fields[ef.URL] = og_url = self._alt_urls.get(entry, entry)
             normalized_site = normalize(entry)
 
+        if not (out_fields.get(ef.NAME) and out_fields.get(ef.DESC)):
+            fetched_name, fetched_desc = fetch_site_meta(og_url)
+            if not out_fields[ef.NAME]:
+                out_fields[ef.NAME] = fetched_name
+            if not out_fields[ef.DESC]:
+                out_fields[ef.DESC] = fetched_desc
         
         if self._add_repos_opt and (repo := check_repo(normalized_site)):
             out_fields[ef.URL], normalized_site = self.add_repo_site(repo, repo)

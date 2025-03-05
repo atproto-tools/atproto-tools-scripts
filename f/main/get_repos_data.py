@@ -7,6 +7,7 @@ import wmill
 import pprint
 import re
 from f.main.ATPTGrister import ATPTGrister, CustomGrister, make_timestamp, t, kf, gf, mf, check_stale
+from operator import itemgetter as getter
 
 class rt(StrEnum):
     LICENSES = "Licenses"
@@ -32,30 +33,6 @@ ref_field_names = {
 def batched(long_list: list, n=1):
     for ndx in range(0, len(long_list), n):
         yield long_list[ndx:ndx+n]
-
-
-gitea_field_key = { #thank u claude
-    "website": "homepageUrl",
-    "description": "description",
-    "updated_at": "updatedAt",
-    "archived": "isArchived",
-    "created_at": "createdAt",
-    "forks_count": "forkCount",
-    "stars_count": "stargazerCount",
-    "open_issues_count": "issues",  # GitHub has this nested under issues with state OPEN
-    "open_pr_counter": "pullRequests",  # GitHub has this nested under pullRequests with state OPEN
-    "language": ref_field_names[rt.LANGUAGES]
-    # for now we just make a gross assumption that github language names map neatly to gitea names
-
-    # Topics
-    # "topics": "topics",  # GitHub has this nested under nodes
-    
-    # License #TODO idk how to merge gitea and github licenses
-    # "licenses": "license",  # GitHub has this as a single license under licenseInfo
-    
-    # Release info (partial match)
-    # "release_counter": "latestRelease",  # a simple counter doesn't seem useful
-}
 
 fragment = """
 fragment repoProperties on Repository {
@@ -160,29 +137,46 @@ def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[str]) -> dict[kf, dict
         tracker["entries"].append(fields)
         fields[ref_field_names[dest]] = val
 
-    #TODO support other forges. forgejo? inquire about other popular ones. Gitlab doesn't seem to have a public api at all?
-    gitea_domains = ["gitea.com", "git.syui.ai"]  # TODO store this in a wmill variable or smth
+    #TODO support other forges. inquire about other popular ones. Gitlab doesn't seem to have a public api at all?
+    # codeberg/forgejo seems to generally support the old gitea api 1:1 for now. but gotta keep an eye out
+    gitea_domains = ["gitea.com", "git.syui.ai", "codeberg.org"]  # TODO store this in a wmill variable or smth
     gitea_urls = [
         parsed_url
         for url in repo_urls
         if (parsed_url := urlparse(url)).netloc in gitea_domains
         and len(parsed_url.path.strip("/").split("/")) == 2
     ]
+    
+    gitea_field_key = { #thank u claude
+        "homepageUrl": getter("website"),
+        "description": getter("description"),
+        "updatedAt": getter("updated_at"),
+        mf.STATUS: lambda x: "archived" if x.get("archived") else None,
+        "createdAt": getter("created_at"),
+        "forkCount": getter("forkCount"),
+        "stargazerCount": getter("stargazerCount"),
+        "issues": getter("issues"),  # GitHub has this nested under issues with state OPEN
+        "pullRequests": getter("pullRequests"),  # GitHub has this nested under pullRequests with state OPEN
+        #TODO for now we just make a gross assumption that github language names map neatly to gitea names, but we should really verify
+        ref_field_names[rt.LANGUAGES]: lambda x: add_refs(x, rt.LANGUAGES, x.get("languages")),
+
+        # Topics
+        # "topics": "topics",  # GitHub has this nested under nodes. #TODO idk how to handle mapping them onto github topics
+        
+        # License #TODO same problem, not sure how to map them to github equivalents
+        # "licenses": "license",  # GitHub has this as a single license under licenseInfo
+    }
+
     for i in gitea_urls:
-        url = urlunparse(i)
-        new_path = "/api/v1/repos" + i.path
-        endpoint = urlunparse(i._replace(path=new_path))
+        endpoint = urlunparse(i._replace(path="/api/v1/repos" + i.path))
         resp = requests.get(endpoint)
         resp.raise_for_status()
         r_json = resp.json()
-        # records[url] = {
-        #     gitea_field_key[field]: value for field, value in r_json
-        # }
         out = {mf.POLLED: int(time())}
-        for gitea_field, grist_field in gitea_field_key.items():
-            if (val := r_json.get(gitea_field)) is not None:
-                out[grist_field] = val
-        records[url] = out
+        for grist_field, field_getter in gitea_field_key.items():
+            if (val := field_getter(r_json)) is not None:
+                out[grist_field] = val 
+        records[urlunparse(i)] = out
     
     github_urls: list[tuple[str, str]] = [
         (rmatch[1], rmatch[2])
@@ -214,6 +208,7 @@ def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[str]) -> dict[kf, dict
         if resp:
             for field, v in resp.items():
                 if v:
+                    #TODO redo this to a dict of lambdas maybe? but some of these are multiline and lambdas can't be. ask an experienced dev
                     match field:
                         #TODO iirc there was a lib to automate structural type hinting for graphql fields
                         case "homepageUrl":
@@ -221,7 +216,7 @@ def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[str]) -> dict[kf, dict
                         case "description":
                             out[field] = v
                         case "isArchived":
-                            out[field] = v
+                            out[mf.STATUS] = "archived"
                         case "defaultBranchRef":
                             out["updatedAt"] = make_timestamp(v["target"]["committedDate"])
                         case "latestRelease":
@@ -256,7 +251,7 @@ def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[str]) -> dict[kf, dict
                             #TODO more fields for licenses
                             add_refs(out, rt.LICENSES, v["name"])
         else:
-            out[mf.INACTIVE] = "true"
+            out[mf.STATUS] = "not found"
         records[url] = out
 
     g.write_authors()
@@ -281,22 +276,20 @@ def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[str]) -> dict[kf, dict
     return records
 
 
-def update_all_repos(g: CustomGrister | None = None):
+def update_all_repos(g: CustomGrister | None = None, include_inactive: bool = True):
     g = g or ATPTGrister(fetch_authors=True)
     #TODO convert to sql query
     all_repos = [
         i[kf.NORMAL_URL]
         for i in g.list_records("Repos")[1]
-        if ( True
-            # i.get("github_path")
-            # and not i.get(mf.INACTIVE)
-            # and not i.get("isArchived")
+        if (
+            # TODO if we start to get a large fraction of archived/deleted repos, move checking those to a separate (less frequent) job
+            include_inactive and not i.get(mf.STATUS)
             and check_stale(i.get(mf.POLLED))
         )
     ]
     records = fetch_repo_data(g, all_repos)
     assert records
-    print(len(str(records)))
     g.add_update_records(t.REPOS, list(
         {
             gf.KEY: {kf.NORMAL_URL: url},

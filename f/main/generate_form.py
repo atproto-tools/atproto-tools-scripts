@@ -1,5 +1,5 @@
 from f.main.Collector import lex
-def main():
+def main(custom_lexicon = False):
     return {
         "type": "object",
         "order": [
@@ -66,7 +66,7 @@ def main():
                 "enumLabels": {lex_num: lex_name.lower() for lex_name, lex_num in lex._member_map_.items()},
                 "enum": list(lex._member_map_.values()),
                 "description": "",
-                "disableCreate": True
+                "disableCreate": custom_lexicon
             }
         }
     }

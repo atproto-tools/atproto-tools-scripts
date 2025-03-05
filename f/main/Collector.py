@@ -1,4 +1,4 @@
-from enum import StrEnum
+from enum import IntEnum, StrEnum
 from itertools import zip_longest
 import re
 from typing import Iterable, Any, cast
@@ -21,7 +21,7 @@ class ef(StrEnum):  # would have used an enum but it has "name" attr reserved
     URL = "url"
     REPO = "repo"
     AUTHOR = "author" # must be an atprotoef = EntryFields() did or handle
-    LEXICONS = "lexicons"
+    LEXICON = "lexicon"
 
 class tf(StrEnum):
     """names of table fields"""
@@ -30,19 +30,19 @@ class tf(StrEnum):
     ALT_URLS = "alt_urls"
 
 #i guess they have to be maintained manually. keep this enum in sync with https://atproto-tools.getgrist.com/p2SiVPSGqbi8/main-list/p/27, use "enum expression" column
-class lex(StrEnum):
-    WHTWND = '1'
-    SMOKE_SIGNAL = '2'
-    FRONTPAGE = '3'
-    LINKAT = '4'
-    RECIPE_EXCHANGE = '5'
-    SKYLIGHTS = '6'
-    PICOSKY = '7'
-    PINKSEA = '8'
-    STATUSPHERE = '9'
-    ATFILE = '10'
-    BLUESKY = '11'
-    UNIVERSAL = '12'
+class lex(IntEnum):
+    WHTWND = 1
+    SMOKE_SIGNAL = 2
+    FRONTPAGE = 3
+    LINKAT = 4
+    RECIPE_EXCHANGE = 5
+    SKYLIGHTS = 6
+    PICOSKY = 7
+    PINKSEA = 8
+    STATUSPHERE = 9
+    ATFILE = 10
+    BLUESKY = 11
+    UNIVERSAL = 12
 
 record = dict[gf, dict[str, Any]]
 
@@ -272,7 +272,7 @@ class Collector:
                             out_fields[self._og_tag_field] = value
                     case ef.AUTHOR:
                         self.add_author_site(value, normalized_site)
-                    case ef.LEXICONS:
+                    case ef.LEXICON:
                             out_fields[t.LEXICONS] = self.sites.get(normalized_site, {}).get(t.LEXICONS) or ["L"]
                             if isinstance(field, str):
                                 add_one_missing(out_fields[t.LEXICONS], value)
@@ -302,8 +302,8 @@ class Collector:
                     out_fields.get(self._df[ef.RATING], 0),
                     old_rating
                 )
-            if old_lexicons := old_fields.get(ef.LEXICONS):
-                add_missing(out_fields[ef.LEXICONS], old_lexicons)
+            if old_lexicons := old_fields.get(ef.LEXICON):
+                add_missing(out_fields[ef.LEXICON], old_lexicons)
             old_fields |= out_fields
         else:
             out_fields[t.SOURCES] = self.add_source(self.sites, normalized_site)
@@ -375,7 +375,7 @@ class Collector:
                     "id": col_id,
                     gf.FIELDS: {"label": self._source_label + " " + suffix},
                 }
-                # TODO add more formatting rules. (column type, width etc)
+                # TODO add more formatting rules. (column type, width if possible)
                 entry_fields = col_record[gf.FIELDS]
                 if suffix == ef.TAGS:
                     entry_fields |= {

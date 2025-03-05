@@ -163,7 +163,11 @@ value:
             autoRefresh: true
             connections: []
             expr: ''
-            fields: {}
+            fields:
+              custom_lexicon:
+                type: static
+                value: true
+                fieldType: boolean
             fieldType: schema
             hideRefreshButton: true
             recomputeOnInputChanged: false
@@ -182,7 +186,11 @@ value:
                   - obj
                   - l
                   - file_
-                properties: {}
+                properties:
+                  custom_lexicon:
+                    type: boolean
+                    description: ''
+                    default: false
                 required: []
           configuration:
             defaultValues:
@@ -600,33 +608,6 @@ value:
               style: ''
           horizontalAlignment: left
           verticalAlignment: center
-      - '12':
-          fixed: false
-          fullHeight: false
-          h: 1
-          w: 6
-          x: 6
-          'y': 0
-        '3':
-          fixed: false
-          fullHeight: false
-          h: 1
-          w: 3
-          x: 0
-          'y': 1
-        id: recomputeall
-        data:
-          id: recomputeall
-          type: recomputeallcomponent
-          actions: []
-          configuration: {}
-          customCss:
-            container:
-              class: ''
-              style: ''
-          horizontalAlignment: right
-          menuItems: []
-          verticalAlignment: center
   unusedInlineScripts: []
 custom_path: internal_form
 policy:
@@ -636,7 +617,8 @@ policy:
     'c:script/f/main/generate_form':
       allow_user_resources: []
       one_of_inputs: {}
-      static_inputs: {}
+      static_inputs:
+        custom_lexicon: true
     'd:script/f/data_sources/internal_form':
       allow_user_resources:
         - url

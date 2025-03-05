@@ -5,7 +5,7 @@ value:
   grid:
     - '12':
         fixed: false
-        fullHeight: false
+        fullHeight: true
         h: 21
         w: 12
         x: 0
@@ -27,31 +27,6 @@ value:
         panes:
           - 50
           - 50
-    - '12':
-        fixed: false
-        fullHeight: false
-        h: 2
-        w: 12
-        x: 0
-        'y': 0
-      '3':
-        fixed: false
-        fullHeight: false
-        h: 2
-        w: 6
-        x: 0
-        'y': 8
-      id: topbar
-      data:
-        id: topbar
-        type: containercomponent
-        actions: []
-        configuration: {}
-        customCss:
-          container:
-            class: '!p-0'
-            style: ''
-        numberOfSubgrids: 1
   hiddenInlineScripts: []
   hideLegacyTopBar: true
   norefreshbar: false
@@ -59,7 +34,7 @@ value:
     a-0:
       - '12':
           fixed: false
-          fullHeight: false
+          fullHeight: true
           h: 19
           w: 12
           x: 0
@@ -415,7 +390,7 @@ value:
     a-1:
       - '12':
           fixed: false
-          fullHeight: false
+          fullHeight: true
           h: 20
           w: 12
           x: 0
@@ -450,7 +425,7 @@ value:
     b-0:
       - '12':
           fixed: false
-          fullHeight: false
+          fullHeight: true
           h: 18
           w: 12
           x: 0
@@ -500,90 +475,8 @@ value:
                 componentId: d
                 path: jobId
           customCss: {}
-    topbar-0:
-      - '12':
-          fixed: false
-          fullHeight: false
-          h: 1
-          w: 6
-          x: 0
-          'y': 0
-        '3':
-          fixed: false
-          fullHeight: false
-          h: 1
-          w: 6
-          x: 0
-          'y': 0
-        id: title
-        data:
-          id: title
-          type: textcomponent
-          actions: []
-          componentInput:
-            type: templatev2
-            connections:
-              - id: summary
-                componentId: ctx
-            eval: '${ctx.summary}'
-            fieldType: template
-          configuration:
-            copyButton:
-              type: static
-              value: false
-            disableNoText:
-              type: static
-              value: true
-              fieldType: boolean
-            style:
-              type: static
-              value: Body
-            tooltip:
-              type: evalv2
-              value: ''
-              connections:
-                - id: author
-                  componentId: ctx
-              expr: '`Author: ${ctx.author}`'
-              fieldType: text
-          customCss:
-            container:
-              class: ''
-              style: ''
-            text:
-              class: text-xl font-semibold whitespace-nowrap truncate
-              style: ''
-          horizontalAlignment: left
-          verticalAlignment: center
-      - '12':
-          fixed: false
-          fullHeight: false
-          h: 1
-          w: 6
-          x: 6
-          'y': 0
-        '3':
-          fixed: false
-          fullHeight: false
-          h: 1
-          w: 3
-          x: 0
-          'y': 1
-        id: recomputeall
-        data:
-          id: recomputeall
-          type: recomputeallcomponent
-          actions: []
-          configuration: {}
-          customCss:
-            container:
-              class: ''
-              style: ''
-          horizontalAlignment: right
-          menuItems: []
-          verticalAlignment: center
   unusedInlineScripts: []
-custom_path: submission_form
+custom_path: submit
 policy:
   execution_mode: anonymous
   s3_inputs: []

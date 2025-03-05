@@ -61,7 +61,7 @@ def main():
                     normal_app_url, _ = c.add_site({
                         ef.URL: app_url,
                         ef.TAGS: [lex_name],
-                        ef.LEXICONS: lexicons[lex_name]["id"]
+                        ef.LEXICON: lexicons[lex_name]["id"]
                     })
 
                 elif block[0]["raw"].lower().startswith('bluesky account'):

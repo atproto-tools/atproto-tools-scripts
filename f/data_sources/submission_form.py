@@ -15,7 +15,6 @@ def filter_falsy(d: dict):
 
 out_template = """
 [view your entry here](https://atproto-tools.getgrist.com/p2SiVPSGqbi8/main-list/p/9#a1.s27.r{rec_id}).
-this link includes a unique identifier- you (or anyone you share it with) can use the it to edit any entries you've created.
 """
 submissions_field = "submissions"
 #TODO for now, only one URL per submission, and it must be a new url. if we can figure out how to set a cookie from the web form, we can allow edits (since it allows ownership)
@@ -37,7 +36,7 @@ def main(url: str | None, name: str | None = None, desc: str | None = None, repo
                 ef.DESC: desc,
                 ef.REPO: repo,
                 ef.AUTHOR: author,
-                ef.LEXICON: lexicon,
+                ef.LEXICON: lexicon and int(lexicon),
             })
         else:
             old_record: dict = c.sites[url]
@@ -50,7 +49,7 @@ def main(url: str | None, name: str | None = None, desc: str | None = None, repo
                 ef.DESC: old_record.get("Computed_Description") or desc,
             }
             if lexicon and not old_record.get(t.LEXICONS):
-                new_record[ef.LEXICON] = lexicon
+                new_record[ef.LEXICON] = int(lexicon)
             if repo and not old_record.get(t.REPOS):
                 new_record[ef.REPO] = repo
             if author and not old_record.get(t.AUTHORS):

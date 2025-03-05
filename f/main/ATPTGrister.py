@@ -35,7 +35,7 @@ class kf(StrEnum):
 class mf(StrEnum):
     """metadata fields"""
     POLLED = "last_polled"
-    INACTIVE = "inactive"
+    STATUS = "status"
 
 def normalize(url: str) -> kf:
     if url.find("://") == -1:

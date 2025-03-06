@@ -27,7 +27,7 @@ out_template = """
 """
 #TODO for now, only one URL per submission, and it must be a new url. if we can figure out how to set a cookie from the web form, we can allow edits (since it allows ownership)
 #TODO #blocked once tags are unified, add a tag selector (via cached net request in wmill)
-def main(url: str | None, name: str | None = None, desc: str | None = None, repo: str | None = None, author: str | None = None, lexicon: str | None = None):
+def main(url: str | None, name: str | None = None, desc: str | None = None, repo: str | None = None, author: str | None = None, lexicon: int | None = None):
     c = Collector(submitter, fields = [ef.NAME, ef.DESC], add_repos=True, write_meta=True, fetch_authors=True)
     simple_log("collector init")
     c.g.update_config({'GRIST_API_KEY': wmill.get_variable(path="u/autumn/grist_form_key")})
@@ -53,12 +53,12 @@ def main(url: str | None, name: str | None = None, desc: str | None = None, repo
 
 if __name__ == "__main__":
     main(
-            url="https://atproto-tools.getgrist.com/p2SiVPSGqbi8/",
-            repo="https://github.com/atproto-tools/atproto-tools-scripts/",
-            author="aeshna-cyanea.bsky.social",
+            url="https://bookhive.buzz",
+            repo="https://github.com/nperez0111/bookhive/",
+            author="https://bsky.app/profile/bookhive.buzz",
             # name="atproto tools",
             # desc="open database of the atproto ecosystem",
-            lexicon=lex.UNIVERSAL
+            # lexicon=lex.UNIVERSAL
         )
     main(
             url="https://atproto-tools.getgrist.com/p2SiVPSGqbi8/",

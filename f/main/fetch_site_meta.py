@@ -7,6 +7,8 @@ def clean_title(title: str, url: str):
         title = re.sub(r"GitHub - [^/]+/[^:]+: ", "", title)
     return title
 
+
+
 #TODO add fetching the H1 of the README when we detect a git repo
 def fetch_site_meta(url: str) -> tuple[str | None, str | None]: # thank u claude
     try:
@@ -18,28 +20,38 @@ def fetch_site_meta(url: str) -> tuple[str | None, str | None]: # thank u claude
         # response.encoding = response.apparent_encoding # https://stackoverflow.com/a/58578323/592606
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # Extract Open Graph title and description
-        og_title = soup.find('meta', attrs={'property': 'og:title'})
-        og_description = soup.find('meta', attrs={'property': 'og:description'})
-
-        if isinstance(og_title, Tag) and isinstance(og_description, Tag):
+        # why do people do this (name attrinstead of property as in the spec) :|
+        og_title = soup.find('meta', attrs={'property': 'og:title'}) or soup.find('meta', attrs={'name': 'og:title'})
+        og_description = soup.find('meta', attrs={'property': 'og:description'}) or soup.find('meta', attrs={'name': 'og:description'})
+        
+        # if match_feed := 
+        
+        if isinstance(og_title, Tag):
             title = str(og_title['content'])
-            description = str(og_description['content'])
-            title = clean_title(title, url)
-            return (title, description)
         else:
             title_tag = soup.find('title')
-            title = title_tag.string if isinstance(title_tag, Tag) else None                
-            return (title, None)
+            title = title_tag.string if isinstance(title_tag, Tag) else None
+        title = title and clean_title(title, url)
+        
+        if isinstance(og_description, Tag):
+            description = str(og_description['content'])
+        else:
+            name_desc = soup.find('meta', attrs={'name': 'description'})
+            if isinstance(name_desc, Tag):
+                description = str(name_desc['content'])
+            else:
+                description = None
+
+        return (title, description)
 
     except requests.RequestException as e:
         print(f"An error occurred: {e}")
         return (None, None)
 
 def main():
-    from f.main.Collector import gf, ef, kf, ATPTGrister
+    from f.main.Collector import gf, kf, ATPTGrister
     g = ATPTGrister(False)
-    sites = g.list_records("Sites", {"Computed_Name": [None, ""]})[1]
+    sites = [rec for rec in g.list_records("Sites")[1] if not rec["Computed_Name"] or not rec["Computed_Description"]]
     out_recs = []
     for site_rec in sites:
         out = {
@@ -48,9 +60,9 @@ def main():
         }
         out_fields = out[gf.FIELDS]
         fetched_name, fetched_desc = fetch_site_meta(site_rec['url'])
-        if fetched_name and not site_rec["Computed_Name"]:
+        if fetched_name:
             out_fields["website_title"] = fetched_name
-        if fetched_desc and not site_rec["Computed_Description"]:
+        if fetched_desc:
             out_fields["website_desc"] = fetched_desc
         if out_fields:
             out_recs.append(out)
@@ -58,4 +70,5 @@ def main():
     return {"table-row-object": [rec[gf.FIELDS] | rec[gf.KEY] for rec in out_recs]}
 
 if __name__ == "__main__":
+    print(fetch_site_meta("https://blueskycounter.com/"))
     main()

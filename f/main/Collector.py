@@ -209,11 +209,10 @@ class Collector:
         normal_repo_url = self._alt_urls.get(normal_repo_url, normal_repo_url)
         site = normalized_site
         if normalized_site == normal_repo_url:
-            if (matched_repo := self.repos.get(normal_repo_url, {})).get("normalized_homepage"):
             # if we see a site link to a repo that has a homepage already specified, link to that instead
             # this means we have to manually manage adding and maintaining homepages
             # needed because we may have "instances of a service" pointing back to its repo, and also a separate homepage for the service that also points to the repo
-
+            if (matched_repo := self.repos.get(normal_repo_url, {})).get("normalized_homepage"):
                 site, normalized_site = matched_repo[tf.HOME], matched_repo[kf.NORMAL_HOME]
         if repo_record := self.repos_records.get(normal_repo_url):
             add_one_missing(repo_record[gf.FIELDS][t.SITES], normalized_site)
@@ -256,12 +255,12 @@ class Collector:
         out_fields = out[gf.FIELDS]
         if isinstance(entry, dict):
             og_url: str = entry.pop(ef.URL)
-            normalized_site = normalize(og_url)
-            if redirect := self._alt_urls.get(normalized_site):
-                og_url = normalized_site = redirect
+            normal_site = normalize(og_url)
+            if redirect := self._alt_urls.get(normal_site):
+                og_url = normal_site = redirect
             out_fields[ef.URL] = og_url
-            if repo := entry.pop(ef.REPO, None):
-                out_fields[ef.URL], normalized_site = self.add_repo_site(repo, normalized_site)
+            if normal_repo := entry.pop(ef.REPO, None):
+                out_fields[ef.URL], normal_site = self.add_repo_site(normal_repo, normal_site)
             for field, value in entry.items():
                 match field:
                     case ef.TAGS:
@@ -272,9 +271,9 @@ class Collector:
                             self._tags_set |= set(value)
                             out_fields[self._og_tag_field] = value
                     case ef.AUTHOR:
-                        self.add_author_site(value, normalized_site)
+                        self.add_author_site(value, normal_site)
                     case ef.LEXICON:
-                            out_fields[t.LEXICONS] = self.sites.get(normalized_site, {}).get(t.LEXICONS) or ["L"]
+                            out_fields[t.LEXICONS] = self.sites.get(normal_site, {}).get(t.LEXICONS) or ["L"]
                             if isinstance(field, str):
                                 add_one_missing(out_fields[t.LEXICONS], value)
                             else:
@@ -284,22 +283,22 @@ class Collector:
         else:
             entry = cast(kf, entry)
             out_fields[ef.URL] = og_url = self._alt_urls.get(entry, entry)
-            normalized_site = normalize(entry)
+            normal_site = normalize(entry)
 
         if not (out_fields.get(ef.NAME) and out_fields.get(ef.DESC)):
             fetched_name, fetched_desc = fetch_site_meta(og_url)
-            if not out_fields[ef.NAME]:
-                out_fields[ef.NAME] = fetched_name
-            if not out_fields[ef.DESC]:
-                out_fields[ef.DESC] = fetched_desc
+            if not out_fields.get(ef.NAME):
+                out_fields[self._prefix + ef.NAME] = fetched_name
+            if not out_fields.get(ef.DESC):
+                out_fields[self._prefix + ef.DESC] = fetched_desc
         
-        if self._add_repos_opt and (repo := check_repo(normalized_site)):
-            out_fields[ef.URL], normalized_site = self.add_repo_site(repo, repo)
+        if self._add_repos_opt and (normal_repo := check_repo(normal_site)):
+            out_fields[ef.URL], normal_site = self.add_repo_site(normal_repo, normal_repo)
             
-        out[gf.KEY][kf.NORMAL_URL] = normalized_site
+        out[gf.KEY][kf.NORMAL_URL] = normal_site
 
-        if old_fields := self.sites_records.get(normalized_site, {}).get(gf.FIELDS):
-            self._p(normalized_site, out_fields, old_fields)
+        if old_fields := self.sites_records.get(normal_site, {}).get(gf.FIELDS):
+            self._p(normal_site, out_fields, old_fields)
             if old_fields[ef.URL] != out_fields[ef.URL]:
                 print(f"matched urls\n'{old_fields[ef.URL]}'\n'{out_fields[ef.URL]}' in sites")
             if old_tags := old_fields.get(self._og_tag_field):
@@ -313,9 +312,9 @@ class Collector:
                 add_missing(out_fields[ef.LEXICON], old_lexicons)
             old_fields |= out_fields
         else:
-            out_fields[t.SOURCES] = self.add_source(self.sites, normalized_site)
-            self.sites_records[normalized_site] = out
-        return normalized_site, out
+            out_fields[t.SOURCES] = self.add_source(self.sites, normal_site)
+            self.sites_records[normal_site] = out
+        return normal_site, out
 
     def _write_record_table(self, table_id: t):
         dicts = {t.SITES: (self.sites, self.sites_records), t.REPOS: (self.repos, self.repos_records), t.AUTHORS: (self.authors, self.authors_records)}
@@ -408,10 +407,15 @@ class Collector:
             from f.main.get_authors_data import fetch_authors
             repos_metadata = fetch_repo_data(
                 self.g,
-                list(url for i in self.repos_records.keys() if (url := check_repo(i)) and check_stale(self.repos.get(i, {}).get(mf.POLLED))),
+                list(
+                    url
+                    for url in self.repos_records.keys()
+                    if check_stale(self.repos.get(url, {}).get(mf.POLLED))
+                ),
             )
             for url, fields in repos_metadata.items():
                 self.repos_records[url][gf.FIELDS] |= fields
+            
             authors_metadata = fetch_authors(
                 did
                 for did in self.authors_records.keys()

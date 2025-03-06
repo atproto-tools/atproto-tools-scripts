@@ -90,6 +90,16 @@ fragment repoProperties on Repository {
   licenseInfo {
     name
   }
+  README: object(expression: "HEAD:README.md") {
+    ... on Blob {
+      text
+    }
+  }
+  readme: object(expression: "HEAD:readme.md") {
+    ... on Blob {
+      text
+    }
+  }
 }
 """
 template = (
@@ -153,10 +163,10 @@ def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[str]) -> dict[kf, dict
         "updatedAt": getter("updated_at"),
         mf.STATUS: lambda x: "archived" if x.get("archived") else None,
         "createdAt": getter("created_at"),
-        "forkCount": getter("forkCount"),
-        "stargazerCount": getter("stargazerCount"),
-        "issues": getter("issues"),  # GitHub has this nested under issues with state OPEN
-        "pullRequests": getter("pullRequests"),  # GitHub has this nested under pullRequests with state OPEN
+        "forkCount": getter("forks_count"),
+        "stargazerCount": getter("stars_count"),
+        "issues": getter("open_issues_count"),  # GitHub has this nested under issues with state OPEN
+        "pullRequests": getter("open_pr_counter"),  # GitHub has this nested under pullRequests with state OPEN
         #TODO for now we just make a gross assumption that github language names map neatly to gitea names, but we should really verify
         ref_field_names[rt.LANGUAGES]: lambda x: add_refs(x, rt.LANGUAGES, x.get("languages")),
 
@@ -167,6 +177,7 @@ def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[str]) -> dict[kf, dict
         # "licenses": "license",  # GitHub has this as a single license under licenseInfo
     }
 
+    #TODO also add readme.md parsing
     for i in gitea_urls:
         endpoint = urlunparse(i._replace(path="/api/v1/repos" + i.path))
         resp = requests.get(endpoint)
@@ -184,7 +195,9 @@ def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[str]) -> dict[kf, dict
         if (rmatch := re.search(r"https://github\.com/([^/]*)/([^/]*)/?$", url))
     ]
     github_responses: dict[str, dict[str, Any]] = {}
-    batch_size = 64 # 100 is the stated limit, but it still timed out server-side a fair bit. this seems to work better
+    batch_size = 32
+    # 100 is the stated limit, but it still timed out server-side a fair bit. experimentally 64 seems to work better.
+    # 32 when fetching readmes
     for num_req, batch in enumerate(batched(github_urls, batch_size)): 
         repos_query_batch = "\n".join(
             template.format(id="r" + str(num_req * batch_size + i), owner=owner, repo=repo)
@@ -250,6 +263,21 @@ def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[str]) -> dict[kf, dict
                         case "licenseInfo":
                             #TODO more fields for licenses
                             add_refs(out, rt.LICENSES, v["name"])
+                        case "readme":
+                            if v and (text := v["text"]):
+                                # judgement call, sometimes people put meta stuff in the first few lines before the header
+                                lines: list[str] = text.splitlines()[:5]
+                                for line in lines:
+                                    if header := re.match(r"^##? (.*)", line):
+                                        out["readme_header"] = header[1]
+                                        break
+                        case "README":
+                            if v and (text := v["text"]):
+                                lines: list[str] = text.splitlines()[:5]
+                                for line in lines:
+                                    if header := re.match(r"^##? (.*)", line):
+                                        out["readme_header"] = header[1]
+                                        break
         else:
             out[mf.STATUS] = "not found"
         records[url] = out
@@ -284,7 +312,7 @@ def update_all_repos(g: CustomGrister | None = None, include_inactive: bool = Tr
         for i in g.list_records("Repos")[1]
         if (
             # TODO if we start to get a large fraction of archived/deleted repos, move checking those to a separate (less frequent) job
-            include_inactive and not i.get(mf.STATUS)
+            include_inactive or not i.get(mf.STATUS)
             and check_stale(i.get(mf.POLLED))
         )
     ]

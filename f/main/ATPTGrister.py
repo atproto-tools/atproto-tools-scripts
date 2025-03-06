@@ -164,7 +164,11 @@ class CustomGrister(GristApi):
                     else:
                         self.authors_lookup[author_handle] = self.authors_lookup[did]
                         self.authors_lookup[author_handle][kf.HANDLE] = author_handle
-                    self._new_authors_records[did] = {gf.KEY: {kf.DID: did}, gf.FIELDS: {kf.HANDLE: author_handle}}
+                    
+                    if author_handle in self.authors_lookup:
+                        self._new_authors_records[author_handle] = {gf.KEY: {kf.HANDLE: author_handle}, gf.FIELDS: {kf.DID: did}}
+                    else:
+                        self._new_authors_records[did] = {gf.KEY: {kf.DID: did}, gf.FIELDS: {kf.HANDLE: author_handle}}
                 else:
                     #TODO handle this better somehow
                     print(f"failed to resolve {author}: {resp.reason}. {resp.text}")

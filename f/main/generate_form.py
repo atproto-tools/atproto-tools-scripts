@@ -1,4 +1,4 @@
-from f.main.Collector import lex
+from f.main.lex_enum import lex
 def main(custom_lexicon = False):
     return {
         "type": "object",

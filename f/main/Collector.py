@@ -1,10 +1,11 @@
-from enum import IntEnum, StrEnum
+from enum import StrEnum
 from itertools import zip_longest
 import re
 from typing import Iterable, Any, cast
 from pprint import pformat
 from f.main.ATPTGrister import ATPTGrister, check_stale, mf, t, gf, kf, make_timestamp, normalize
 import feedparser
+from f.main.boilerplate import add_missing, add_one_missing
 from f.main.fetch_site_meta import fetch_site_meta
 
 class ef(StrEnum):  # would have used an enum but it has "name" attr reserved
@@ -30,41 +31,11 @@ class tf(StrEnum):
     HOME = "homepageUrl"
     ALT_URLS = "alt_urls"
 
-#i guess they have to be maintained manually. keep this enum in sync with https://atproto-tools.getgrist.com/p2SiVPSGqbi8/main-list/p/27, use "enum expression" column
-class lex(IntEnum):
-    WHTWND = 1
-    SMOKE_SIGNAL = 2
-    FRONTPAGE = 3
-    LINKAT = 4
-    RECIPE_EXCHANGE = 5
-    SKYLIGHTS = 6
-    PICOSKY = 7
-    PINKSEA = 8
-    STATUSPHERE = 9
-    ATFILE = 10
-    BLUESKY = 11
-    UNIVERSAL = 12
-
 record = dict[gf, dict[str, Any]]
 
 class cmk(StrEnum):
     source_name = "source_name"
     fields= "fields"
-
-def add_one_missing(dest: list[str], item: str | None):
-    # dest = dest.copy()
-    if not item:
-        return dest
-    if item not in dest:
-        dest.append(item)
-    return dest
-
-def add_missing(dest: list[str], source: Iterable[str] | None):
-    # dest = dest.copy()
-    if not source:
-        return dest
-    dest.extend(i for i in source if i not in dest)
-    return dest
 
 # TODO add other forges besides github
 def check_repo(normal_repo_url: str) -> kf | None:

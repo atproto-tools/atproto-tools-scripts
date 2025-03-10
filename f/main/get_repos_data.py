@@ -7,6 +7,7 @@ import wmill
 import pprint
 import re
 from f.main.ATPTGrister import ATPTGrister, CustomGrister, make_timestamp, t, kf, gf, mf, check_stale
+from f.main.boilerplate import batched
 from operator import itemgetter as getter
 
 class rt(StrEnum):
@@ -27,12 +28,6 @@ ref_field_names = {
     rt.LICENSES: "license",
     rt.LANGUAGES: "language"
 }
-
-
-# boilerplate for basic functinality? in MY python??
-def batched(long_list: list, n=1):
-    for ndx in range(0, len(long_list), n):
-        yield long_list[ndx:ndx+n]
 
 fragment = """
 fragment repoProperties on Repository {

@@ -16,7 +16,7 @@ class af(StrEnum):
     FOLLOWING = "followsCount"
     POSTS = "postsCount"
 
-batch_size = 25
+batch_size = 25 # getProfiles api limit
 
 def fetch_authors(authors: Iterable[str]) -> dict[kf, dict[str, Any]]:
     '''

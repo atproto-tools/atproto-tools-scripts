@@ -1,6 +1,7 @@
 import os
 import wmill
-from f.main.Collector import Collector, lex, t, gf, kf, ef, normalize, ATPTGrister
+from f.main.Collector import Collector, t, gf, kf, ef, normalize, ATPTGrister
+from f.main.lex_enum import lex
 
 from datetime import datetime
 start = datetime.now()
@@ -15,7 +16,7 @@ def clean_url(url: str) -> kf:
 def filter_falsy(d: dict):
     return {k: v for k,v in d.items() if v} # gotta 'cast to null' to keep blank/empty values uniform in all tables
 
-submitter = os.environ.get("WM_USERNAME") or ""
+submitter = os.environ["WM_USERNAME"]
 if submitter:
     submitter = submitter.capitalize() #not strictly necessary but sources are capitalized thems the rules
 sg = ATPTGrister(False)
@@ -40,7 +41,7 @@ def main(url: str | None, name: str | None = None, desc: str | None = None, repo
             ef.DESC: desc,
             ef.REPO: repo,
             ef.AUTHOR: author,
-            ef.LEXICON: lexicon and int(lexicon) # TODO add multiple lexicons in the ui. for now submitting twice with different ones should work.
+            ef.LEXICON: lexicon and int(lexicon) # TODO add multiple lexicons in the ui. for now submitting twice with different ones can work.
         })
         c.add_site(new_record)
         simple_log("added")

@@ -1,14 +1,18 @@
+from collections import defaultdict
 from enum import StrEnum
-from typing import Any, Iterable
+from typing import Any, Iterable, cast
 from pygrister.api import GristApi
-import wmill
+from wmill import get_variable as wmill_var
+from atproto import IdResolver
 from json import loads
 import re
-import requests
 from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from f.main.boilerplate import add_missing, get_timed_logger
 utc = ZoneInfo("UTC")
+resolver = IdResolver()
+log = get_timed_logger(__file__)
 
 class t(StrEnum):
     """atproto-tools table names"""
@@ -31,7 +35,7 @@ class kf(StrEnum):
     NORMAL_URL = "normalized_url"
     NORMAL_HOME = "normalized_homepage"
     NAME = "name"
-    
+
 class mf(StrEnum):
     """metadata fields"""
     POLLED = "last_polled"
@@ -71,7 +75,7 @@ def check_stale(timestamp: str | int | float| None, stale_threshold: int = 2) ->
     if not timestamp:
         return True
     timestamp = make_timestamp(timestamp)
-    delta = datetime.now(utc) - datetime.fromtimestamp(timestamp, utc) 
+    delta = datetime.now(utc) - datetime.fromtimestamp(timestamp, utc)
     return delta >= timedelta(days=stale_threshold)
 
 did_regex = r"(?:did:[a-z0-9]+:(?:(?:[a-zA-Z0-9._-]|%[a-fA-F0-9]{2})*:)*(?:[a-zA-Z0-9._-]|%[a-fA-F0-9]{2})+)(?:[^a-zA-Z0-9._-]|$)"
@@ -89,14 +93,69 @@ class CustomGrister(GristApi):
     def __init__(self, config: dict[str, str] | None = None, in_converter: dict | None = None, out_converter: dict | None = None, request_options: dict | None = None, fetch_authors = False):
         super().__init__(config, in_converter, out_converter, request_options)
         self.authors_lookup: dict[kf, dict[str, Any]] = {}
-        if fetch_authors:
-            for record in self.list_records(t.AUTHORS)[1]:
-                if did := record[kf.DID]:
-                    self.authors_lookup[did] = record
-                if handle := record.get(kf.HANDLE):
-                    self.authors_lookup[handle] = record
         self._new_authors_records: dict[kf, dict[str, Any]] = {}
-    
+        authors_by_did: dict[kf, dict[str, dict[str, Any]]] = defaultdict(dict)
+        invalid_dids = []
+        if not fetch_authors:
+            return
+        old_records: list[dict[str, Any]] = self.list_records(t.AUTHORS)[1]
+        for row in old_records:
+            handle: kf | None = row.get(kf.HANDLE)
+            did: kf | None = row.get(kf.DID)
+            if did and not handle:
+                if handle := self.get_handle(did):
+                    row[kf.HANDLE] = handle
+                    row['missing_handle'] = True
+                    log.info(f'fetched handle {handle}')
+                else:
+                    log.warning(f"record id {row['id']} has no handle for did {did}")
+            elif handle and not did:
+                if did := self.get_did(handle):
+                    row[kf.DID] = did
+                    self._new_authors_records[did] = {gf.KEY: {kf.DID: did}}
+                else:
+                    log.warning(f'no did for handle {handle}')
+                    invalid_dids.append({'id': row['id'], "invalid_did": True})
+                    continue
+            elif not did: # and no handle, logically. but the type checker didn't get the logic
+                log.error(f"record id {row['id']} has no handle and no did")
+                continue
+            
+            authors_by_did[did][row['id']] = row
+        
+        to_delete = set()
+        merged_authors = []
+        for did, record_list in authors_by_did.items():
+            if len(record_list) == 1:
+                if (primary_rec := record_list.popitem()[1]).pop('missing_handle', None):
+                    merged_authors.append({kf.HANDLE: primary_rec[kf.HANDLE], kf.DID: did})
+                continue
+            primary_id, primary_rec = next( # get the record with existing did, otherwise get the latest one
+                ((id, rec) for id, rec in record_list.items() if rec.get(kf.DID)),
+                next(((rec['id'], rec) for rec in sorted(
+                    list(record_list.values()),
+                    key=lambda x: x.get('record_updatedAt', 0)
+                )))
+            )
+            record_list.pop(primary_id)
+            out: dict[str, Any] = {kf.HANDLE: primary_rec[kf.HANDLE], kf.DID: did, "contacted": primary_rec['contacted']} 
+            for id, rec in record_list.items():
+                for k,v in rec.items():
+                    if isinstance(v, list) and v[0] == 'L':
+                        if not out.get(k):
+                            out[k] = ['L']
+                        add_missing(out[k], v)
+                out['handle'] = out['handle'] or rec['handle']
+                out['contacted'] = out['contacted'] or rec['contacted']
+                to_delete.add(id)
+            merged_authors.append(out)
+        if to_delete:
+                self.delete_rows(t.AUTHORS, list(to_delete))
+        if merged_authors or invalid_dids:
+            merged_authors = [{gf.KEY: {kf.DID: rec[kf.DID]}, gf.FIELDS: rec} for rec in merged_authors]
+            merged_authors += [{gf.KEY: {kf.HANDLE}, gf.FIELDS: rec} for rec in invalid_dids]
+            self.add_update_records(t.AUTHORS, merged_authors)
+
     """raises IOError with the request response on http error"""
     def apicall(self, url: str, method: str = 'GET', headers: dict | None = None, params: dict | None = None, json: dict | None = None, filename: str = '') -> tuple[int, Any]:
         resp =  super().apicall(url, method, headers, params, json, filename)
@@ -113,8 +172,8 @@ class CustomGrister(GristApi):
         if replaceall:
             return super().add_update_cols(
                 table_id, cols, noadd, noupdate, replaceall, doc_id, team_id
-            )   
-        
+            )
+
         target_col_ids = {col["id"] for col in cols}
         col_ids: set[str] = {x["id"] for x in self.list_cols(table_id)[1]}
         if (new_col_ids := target_col_ids - col_ids) and not noadd:
@@ -143,6 +202,14 @@ class CustomGrister(GristApi):
             return str(list(ref_key.values()))
         return ref_key
 
+    def get_handle(self, did) -> kf | None:
+        if (resp := resolver.did.resolve(did)) and (handle := resp.get_handle()):
+            return cast(kf, handle)
+
+    def get_did(self, handle) -> kf | None:
+        if out := resolver.handle.resolve(handle):
+            return cast(kf, out)
+
     def resolve_author(self, author: str) -> None | kf:
         """converts handle or profile link to did. if not found, resolves it."""
         if did_match := re.search(did_regex, author):
@@ -154,30 +221,20 @@ class CustomGrister(GristApi):
         elif author_handle := match_handle(author):
             if did := self.authors_lookup.get(author_handle, {}).get(kf.DID):
                 pass
-            else:
-                resp = requests.get("https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle?handle=" + author_handle)
-                if resp.ok:
-                    did = resp.json()[kf.DID]
-                    assert did
-                    if did not in self.authors_lookup:
-                        self.authors_lookup[author_handle] = self.authors_lookup[did] = {kf.DID: did, kf.HANDLE: author_handle}
-                    else:
-                        self.authors_lookup[author_handle] = self.authors_lookup[did]
-                        self.authors_lookup[author_handle][kf.HANDLE] = author_handle
-                    
-                    if author_handle in self.authors_lookup:
-                        self._new_authors_records[author_handle] = {gf.KEY: {kf.HANDLE: author_handle}, gf.FIELDS: {kf.DID: did}}
-                    else:
-                        self._new_authors_records[did] = {gf.KEY: {kf.DID: did}, gf.FIELDS: {kf.HANDLE: author_handle}}
+            elif resp := self.get_did(author_handle):
+                did = cast(kf, resp)
+                if did not in self.authors_lookup:
+                    self.authors_lookup[author_handle] = self.authors_lookup[did] = {kf.DID: did, kf.HANDLE: author_handle}
                 else:
-                    #TODO handle this better somehow
-                    print(f"failed to resolve {author}: {resp.reason}. {resp.text}")
-                    return
+                    self.authors_lookup[author_handle] = self.authors_lookup[did]
+                    self.authors_lookup[author_handle][kf.HANDLE] = author_handle
+
+                self._new_authors_records[did] = {gf.KEY: {kf.DID: did}, gf.FIELDS: {kf.HANDLE: author_handle}}
         else:
-            print(f"{author} is not a valid did or bsky.app profile")
+            log.error(f"{author} is not a valid did or bsky.app profile")
             return
         return did
-    
+
     def write_authors(self):
         if not self._new_authors_records:
             return
@@ -192,11 +249,9 @@ class CustomGrister(GristApi):
 
 def ATPTGrister(fetch_authors = False) -> CustomGrister:
     """Get configured GristApi client"""
-    grist_config = loads(wmill.get_variable("f/main/grist_config"))
-    grist_config["GRIST_API_KEY"] = wmill.get_variable("u/autumn/GRIST_API_KEY")
+    grist_config = loads(wmill_var("f/main/grist_config"))
+    grist_config["GRIST_API_KEY"] = wmill_var("u/autumn/GRIST_API_KEY")
     return CustomGrister(grist_config, fetch_authors=fetch_authors)
 
 if __name__ == "__main__":
-    import pprint
-    g = ATPTGrister()
-    pprint.pprint(g.list_cols("Sites")[1])
+    g = ATPTGrister(True)

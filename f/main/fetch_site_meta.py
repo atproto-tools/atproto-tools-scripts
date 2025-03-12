@@ -1,6 +1,8 @@
 import requests
 from bs4 import BeautifulSoup, Tag
 import re
+from boilerplate import get_timed_logger
+log = get_timed_logger(__file__)
 
 def clean_title(title: str, url: str):
     if url.startswith("https://github.com"):
@@ -8,14 +10,15 @@ def clean_title(title: str, url: str):
     return title
 
 
-
+#TODO add rel-alternate atproto links
 #TODO add fetching the H1 of the README when we detect a git repo
 def fetch_site_meta(url: str) -> tuple[str | None, str | None]: # thank u claude
     try:
         response = requests.get(url)
         response.raise_for_status() 
-        # some of the sites i tested returned improperlydecoded chars by default, for example https://publer.com
+        # some of the sites i tested returned improperly decoded chars by default, for example https://publer.com
         # apparently this is intentional https://github.com/psf/requests/issues/1604
+        # therefore, by executive fiat
         response.encoding = 'utf-8'
         # response.encoding = response.apparent_encoding # https://stackoverflow.com/a/58578323/592606
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -23,9 +26,7 @@ def fetch_site_meta(url: str) -> tuple[str | None, str | None]: # thank u claude
         # why do people do this (name attrinstead of property as in the spec) :|
         og_title = soup.find('meta', attrs={'property': 'og:title'}) or soup.find('meta', attrs={'name': 'og:title'})
         og_description = soup.find('meta', attrs={'property': 'og:description'}) or soup.find('meta', attrs={'name': 'og:description'})
-        
-        # if match_feed := 
-        
+
         if isinstance(og_title, Tag):
             title = str(og_title['content'])
         else:
@@ -41,11 +42,11 @@ def fetch_site_meta(url: str) -> tuple[str | None, str | None]: # thank u claude
                 description = str(name_desc['content'])
             else:
                 description = None
-
+        log.debug(f'fetched site {url}\ntitle: {title}\ndesc:  {description}')
         return (title, description)
 
     except requests.RequestException as e:
-        print(f"An error occurred: {e}")
+        log.error(f"An error occurred fetching {url}:\n{e}")
         return (None, None)
 
 def main():
@@ -70,5 +71,5 @@ def main():
     return {"table-row-object": [rec[gf.FIELDS] | rec[gf.KEY] for rec in out_recs]}
 
 if __name__ == "__main__":
-    print(fetch_site_meta("https://blueskycounter.com/"))
+    # fetch_site_meta("https://blueskycounter.com/")
     main()

@@ -5,8 +5,9 @@ from typing import Iterable, Any, cast
 from pprint import pformat
 from f.main.ATPTGrister import ATPTGrister, check_stale, mf, t, gf, kf, make_timestamp, normalize
 import feedparser
-from f.main.boilerplate import add_missing, add_one_missing
+from f.main.boilerplate import add_missing, add_one_missing, get_timed_logger
 from f.main.fetch_site_meta import fetch_site_meta
+log = get_timed_logger(__file__) #TODO add more logging in collector.py
 
 class ef(StrEnum):  # would have used an enum but it has "name" attr reserved
     """
@@ -54,7 +55,6 @@ class Collector:
             add_repo (bool, optional): whether to check for repo link when adding entries. Defaults to False.
             authors (boo, optional): whether to prefetch authors. Defaults to False.
         """
-        print("starting collector for " + source_name)
         self.g = ATPTGrister(fetch_authors)
         self._source_name = source_name
         self._prefix = source_name + "_"
@@ -65,6 +65,7 @@ class Collector:
         if source_feed := source_record.get("feed"):
             #TODO fix type annotations in feedparser upstream
             self.check_update_timestamp(feedparser.parse(source_feed).feed.updated) #type: ignore
+            log.info("checked feed")
             pass
         self._source_id = source_record["id"]
         self._source_label = source_record["label"]
@@ -83,7 +84,7 @@ class Collector:
             if rec_alt_urls := rec.get(tf.ALT_URLS):
                 self._alt_urls |= {alt: normal_url for alt in rec_alt_urls.splitlines()}
         # max allowed size is 1mb. truncated by default, change MAXSAVEDRESP to MAXSAVEDRESP = 1000000 in grister's api.py
-        print(f"Sites is {len(self.g.resp_content) / 1000000 } of max request size")
+        log.info(f"Sites is {len(self.g.resp_content) / 1000000 } of max request size")
         self.repos = {}
         self._add_repos_opt = add_repos
         for rec in self.g.list_records(t.REPOS)[1]:
@@ -114,7 +115,7 @@ class Collector:
         includes url as the last element (though it is a key and not a field)
         """
         self.write_meta = write_meta
-        print("finished setup")
+        log.info(f"finished collector setup for {source_name}")
 
     def check_update_timestamp(self, timestamp: str | int | float):
         self.current_update_timestamp = make_timestamp(timestamp)
@@ -168,9 +169,9 @@ class Collector:
 
     def _p(self, key: str, new: Any = None, old: Any = None) -> None:
         if old and new:
-            print(f"\nDuplicate for {key}:\n{pformat(old)}\n->\n{pformat(new)}")
+            log.info(f"\nDuplicate for {key}:\n{pformat(old)}\n->\n{pformat(new)}")
         else:
-            print(f"\nDuplicate for {key}")
+            log.info(f"\nDuplicate for {key}")
 
     def add_source(self, table: dict[kf, Any], key: kf):
         return add_one_missing(table.get(key, {}).get(t.SOURCES) or ["L"], self._source_id)
@@ -202,7 +203,7 @@ class Collector:
     def add_author_site(self, author: str, normal_url: kf) -> kf | None:
         did = self.g.resolve_author(author)
         if not did:
-            print(f"^ author of {normal_url}")
+            log.error(f"^ author of {normal_url}")
             return
         
         if author_record := self.authors_records.get(did):
@@ -271,7 +272,7 @@ class Collector:
         if old_fields := self.sites_records.get(normal_site, {}).get(gf.FIELDS):
             self._p(normal_site, out_fields, old_fields)
             if old_fields[ef.URL] != out_fields[ef.URL]:
-                print(f"matched urls\n'{old_fields[ef.URL]}'\n'{out_fields[ef.URL]}' in sites")
+                log.debug(f"matched urls\n'{old_fields[ef.URL]}'\n'{out_fields[ef.URL]}' in sites")
             if old_tags := old_fields.get(self._og_tag_field):
                 out_fields[self._og_tag_field].extend(i for i in old_tags if i not in out_fields[self._og_tag_field])
             if old_rating := old_fields.get(self._df[ef.RATING]):
@@ -301,7 +302,7 @@ class Collector:
                     record[gf.FIELDS][t.SITES] = add_missing(dest, source)
         current_entries = {i for i,v in entries.items() if self._source_id in (v.get(t.SOURCES) or [])}
         if deleted_entries := current_entries - records.keys():
-            print(f"{table_id} not present in live {self._source_label}:\n{deleted_entries}")
+            log.info(f"{table_id} not present in live {self._source_label}:\n{deleted_entries}")
         out = list(records.values())
         self.g.add_update_records(table_id, out)
         return [rec[gf.KEY] | rec[gf.FIELDS] for rec in out]
@@ -367,7 +368,7 @@ class Collector:
                     }
                 cols_tables.append(col_record)
             self.g.add_update_cols(t.SITES, cols_tables, noupdate=True)
-            print("wrote cols")
+            log.debug(f"wrote cols {[col['id'] for col in cols_tables]}")
         
         self._write_record_table(t.SITES)
         #TODO SQL filters here too

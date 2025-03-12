@@ -2,12 +2,8 @@ import os
 import wmill
 from f.main.Collector import Collector, t, gf, kf, ef, normalize, ATPTGrister
 from f.main.lex_enum import lex
-
-from datetime import datetime
-start = datetime.now()
-def simple_log(msg: str):
-    # print(datetime.now() - start, msg)
-    return
+from f.main.boilerplate import get_timed_logger
+log = get_timed_logger(__file__)
 
 #TODO other sanitization? idk what the risks are
 def clean_url(url: str) -> kf:
@@ -30,9 +26,7 @@ out_template = """
 #TODO #blocked once tags are unified, add a tag selector (via cached net request in wmill)
 def main(url: str | None, name: str | None = None, desc: str | None = None, repo: str | None = None, author: str | None = None, lexicon: int | None = None):
     c = Collector(submitter, fields = [ef.NAME, ef.DESC], add_repos=True, write_meta=True, fetch_authors=True)
-    simple_log("collector init")
     c.g.update_config({'GRIST_API_KEY': wmill.get_variable(path="u/autumn/grist_form_key")})
-    simple_log("updated config")
     url, repo = url and clean_url(url), repo and clean_url(repo)
     if url:
         new_record = filter_falsy({
@@ -44,9 +38,8 @@ def main(url: str | None, name: str | None = None, desc: str | None = None, repo
             ef.LEXICON: lexicon and int(lexicon) # TODO add multiple lexicons in the ui. for now submitting twice with different ones can work.
         })
         c.add_site(new_record)
-        simple_log("added")
         c.output()
-        simple_log("wrote")
+        log.info("wrote output")
         out = out_template.format(rec_id = c.sites[url]['id'])
     else:
         out = "no url provided"

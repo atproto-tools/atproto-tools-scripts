@@ -1,5 +1,6 @@
 from collections import defaultdict
 from enum import StrEnum
+from pprint import pp
 from typing import Any, Iterable, cast
 from pygrister.api import GristApi
 from wmill import get_variable as wmill_var
@@ -12,7 +13,7 @@ from zoneinfo import ZoneInfo
 from f.main.boilerplate import add_missing, get_timed_logger
 utc = ZoneInfo("UTC")
 resolver = IdResolver()
-log = get_timed_logger(__file__)
+log = get_timed_logger(__file__, 'debug')
 
 class t(StrEnum):
     """atproto-tools table names"""
@@ -94,10 +95,10 @@ class CustomGrister(GristApi):
         super().__init__(config, in_converter, out_converter, request_options)
         self.authors_lookup: dict[kf, dict[str, Any]] = {}
         self._new_authors_records: dict[kf, dict[str, Any]] = {}
-        authors_by_did: dict[kf, dict[str, dict[str, Any]]] = defaultdict(dict)
-        invalid_dids = []
         if not fetch_authors:
             return
+        authors_by_did: dict[kf, dict[str, dict[str, Any]]] = defaultdict(dict)
+        invalid_dids = []
         old_records: list[dict[str, Any]] = self.list_records(t.AUTHORS)[1]
         for row in old_records:
             handle: kf | None = row.get(kf.HANDLE)
@@ -105,31 +106,38 @@ class CustomGrister(GristApi):
             if did and not handle:
                 if handle := self.get_handle(did):
                     row[kf.HANDLE] = handle
-                    row['missing_handle'] = True
-                    log.info(f'fetched handle {handle}')
+                    row['no_handle'] = True
+                    log.info(f'fetched handle {handle} for {did}')
                 else:
                     log.warning(f"record id {row['id']} has no handle for did {did}")
             elif handle and not did:
-                if did := self.get_did(handle):
+                if did := self.resolve_author(handle):
                     row[kf.DID] = did
-                    self._new_authors_records[did] = {gf.KEY: {kf.DID: did}}
+                    row['no_did'] = True
+                    log.info(f'fetched {did} for handle {handle}')
                 else:
                     log.warning(f'no did for handle {handle}')
                     invalid_dids.append({'id': row['id'], "invalid_did": True})
                     continue
             elif not did: # and no handle, logically. but the type checker didn't get the logic
-                log.error(f"record id {row['id']} has no handle and no did")
+                log.error(f"record id {row['id']} has no valid handle or did")
                 continue
-            
+
+            if handle:
+                self.authors_lookup[handle] = row
+            self.authors_lookup[did] = row
             authors_by_did[did][row['id']] = row
         
         to_delete = set()
         merged_authors = []
         for did, record_list in authors_by_did.items():
             if len(record_list) == 1:
-                if (primary_rec := record_list.popitem()[1]).pop('missing_handle', None):
+                if (primary_rec := record_list.popitem()[1]).get('no_did', None):
+                    merged_authors.append({kf.HANDLE: primary_rec[kf.HANDLE], kf.DID: did, 'no_did': True})
+                elif primary_rec.pop('no_handle', None):
                     merged_authors.append({kf.HANDLE: primary_rec[kf.HANDLE], kf.DID: did})
                 continue
+
             primary_id, primary_rec = next( # get the record with existing did, otherwise get the latest one
                 ((id, rec) for id, rec in record_list.items() if rec.get(kf.DID)),
                 next(((rec['id'], rec) for rec in sorted(
@@ -142,18 +150,31 @@ class CustomGrister(GristApi):
             for id, rec in record_list.items():
                 for k,v in rec.items():
                     if isinstance(v, list) and v[0] == 'L':
-                        if not out.get(k):
+                        if not primary_rec.get(k):
                             out[k] = ['L']
-                        add_missing(out[k], v)
+                        out[k] = add_missing(primary_rec[k], v)
                 out['handle'] = out['handle'] or rec['handle']
                 out['contacted'] = out['contacted'] or rec['contacted']
                 to_delete.add(id)
             merged_authors.append(out)
         if to_delete:
-                self.delete_rows(t.AUTHORS, list(to_delete))
+            self.delete_rows(t.AUTHORS, list(to_delete))
         if merged_authors or invalid_dids:
-            merged_authors = [{gf.KEY: {kf.DID: rec[kf.DID]}, gf.FIELDS: rec} for rec in merged_authors]
+            merged_authors = [
+                {
+                    gf.KEY: {kf.HANDLE: rec[kf.HANDLE]}
+                    if rec.pop("no_did", None)
+                    else {kf.DID: rec[kf.DID]},
+                    gf.FIELDS: rec,
+                }
+                for rec in merged_authors
+            ]
             merged_authors += [{gf.KEY: {kf.HANDLE}, gf.FIELDS: rec} for rec in invalid_dids]
+            pp(merged_authors)
+            # for i in merged_authors:
+            #     log.debug(f'POSTing {i[gf.KEY]}')
+            #     pp(i[gf.FIELDS])
+            #     self.add_update_records(t.AUTHORS, [i])
             self.add_update_records(t.AUTHORS, merged_authors)
 
     """raises IOError with the request response on http error"""
@@ -202,26 +223,31 @@ class CustomGrister(GristApi):
             return str(list(ref_key.values()))
         return ref_key
 
-    def get_handle(self, did) -> kf | None:
+    def get_handle(self, did: str) -> kf | None:
+        if handle := self.authors_lookup.get(cast(kf, did), {}).get(kf.HANDLE):
+            log.debug(f'cache hit for {handle} handle lookup')
+            return handle
         if (resp := resolver.did.resolve(did)) and (handle := resp.get_handle()):
             return cast(kf, handle)
 
-    def get_did(self, handle) -> kf | None:
+    def _fetch_did(self, handle: str) -> kf | None:
+        """better to use self.resolve_author since it has a cache"""
         if out := resolver.handle.resolve(handle):
             return cast(kf, out)
 
     def resolve_author(self, author: str) -> None | kf:
         """converts handle or profile link to did. if not found, resolves it."""
         if did_match := re.search(did_regex, author):
-            did: kf | None = did_match[0] #type: ignore
+            did: kf | None = cast(kf, did_match[0])
             assert did
             if did not in self.authors_lookup and did not in self._new_authors_records:
                 self.authors_lookup[did] = {kf.DID: did}
                 self._new_authors_records[did] =  {gf.KEY: {kf.DID: did}}
         elif author_handle := match_handle(author):
             if did := self.authors_lookup.get(author_handle, {}).get(kf.DID):
+                log.debug(f'cache hit for {author_handle} did lookup')
                 pass
-            elif resp := self.get_did(author_handle):
+            elif resp := self._fetch_did(author_handle):
                 did = cast(kf, resp)
                 if did not in self.authors_lookup:
                     self.authors_lookup[author_handle] = self.authors_lookup[did] = {kf.DID: did, kf.HANDLE: author_handle}

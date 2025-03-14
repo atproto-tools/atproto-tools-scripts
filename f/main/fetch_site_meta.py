@@ -1,7 +1,7 @@
 import requests
 from bs4 import BeautifulSoup, Tag
 import re
-from boilerplate import get_timed_logger
+from f.main.boilerplate import get_timed_logger
 log = get_timed_logger(__file__)
 
 def clean_title(title: str, url: str):

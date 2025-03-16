@@ -1,0 +1,105 @@
+# ruff: noqa: E402 
+from httpx import Client
+from pydantic import ValidationError
+from f.main.boilerplate import url_obj, get_timed_logger
+log = get_timed_logger(__file__, 'info')
+from collections import defaultdict
+import re
+import json
+from pprint import pformat, pp
+from f.main.ATPTGrister import ATPTGrister, gf
+from f.main.github_client import gh, get_repo_files
+from atproto_lexicon.parser import lexicon_parse
+
+nsid_regex = re.compile(r"^(?P<domain_authority>[a-zA-Z](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9]))+)\.(?P<name>(?:[a-zA-Z](?:[a-zA-Z0-9]{0,62})?)+)$")
+
+github_url_regex = re.compile(
+    r'github\.com/'
+    r'(?P<owner>[^/]+)/'
+    r'(?P<repo>[^/]+)/'
+    r'tree/'
+    r'(?P<branch>[^/]+)'
+)
+github_template = "https://github.com/{0}/{1}/tree/{2}/{3}"
+
+log.debug('finished imports')
+
+unwanted_domains = [
+    'chat.bsky'
+]
+
+wanted_lexicons = defaultdict(dict)
+
+def check_lex_rec(raw: str) -> tuple[str, str | None] | None:
+    lex_json = json.loads(raw)
+    try:
+        parse_error = None
+        lex = lexicon_parse(lex_json)
+        #TODO add support for lexicon revisions etc
+        for lex_def in lex.defs.values():
+            if lex_def.type == 'record':
+                if nsid := nsid_regex.match(lex.id):
+                    domain, name = nsid.groups()
+                    log.debug(f'lexicon_parse got record for lex {name} of {domain} ')
+                    return lex.id, parse_error
+                else:
+                    log.error(f"found lex {lex.id} but it's not valid!")
+    except ValidationError as e: #TODO speaking of, why doesn't it raise 
+        parse_error = json.dumps(e.errors())
+        log.error(e)
+
+    # the validation code isn't completely correct so for now we do our own check i guess
+    for lex_def in lex_json['defs'].values():
+        if lex_def['type'] == 'record':
+            if nsid := nsid_regex.match(lex_json['id']):
+                domain, name = nsid.groups()
+                log.debug(f'got record for lex {name} of {domain} ')
+                return lex_json['id'], parse_error
+            else:
+                log.error(f"found lex {lex_json['id']} but it's not valid!")
+
+def find_rec_lexicons(url):
+    u = url_obj(url)
+    owner, repo, _, _, *repo_path = u.path
+    repo_path = 'path:' + '/'.join(repo_path) if repo_path else ''
+    query = f'https://api.github.com/search/code?q=repo:{owner}/{repo} "\\"type\\": \\"record\\"" {repo_path} extension:json&per_page=100'
+    paths = []
+    while query:
+        log.debug(f'requesting url\n{query}')
+        r = gh.get(query)
+        data = r.json()
+        paths += [item['path'] for item in data['items']]
+        query = r.links.get('next', {}).get('url')
+    ids = get_repo_files(url, paths, check_lex_rec)
+    return ids
+
+def main():
+    log.debug('starting main')
+    g = ATPTGrister(False)
+    recs = g.list_records("Lexicons", sort='manualSort')[1]
+    log.debug('fetched records')
+    lexicons = {}
+    for rec in recs:
+        if rec.get("machine_readable") == "yes":
+            url = rec.get("source")
+            groups = github_url_regex.search(url).groups()
+            for path, (nsid, parse_error) in find_rec_lexicons(url).items():
+                if nsid not in lexicons:
+                    lexicons[nsid] = {
+                        "path": github_template.format(*groups, path),
+                    }
+                    if parse_error:
+                        lexicons[nsid]["validation_error"] = parse_error
+
+    out = [
+        {
+            gf.KEY: {"nsid": nsid},
+            gf.FIELDS: {**entry},
+        }
+        for nsid, entry in lexicons.items()
+    ]
+    g.add_update_records("Tags_lexicon_record_types", out)
+
+    
+if __name__ == "__main__":
+    main()

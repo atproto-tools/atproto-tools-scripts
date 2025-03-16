@@ -135,7 +135,7 @@ class url_obj:
         }
 
 if __name__ == "__main__":
-    # a = get_timed_logger(__file__)
+    a = get_timed_logger(__file__)
     # b = get_timed_logger()
     # a.info("test")
     # time.sleep(1)

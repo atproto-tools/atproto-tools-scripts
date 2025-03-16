@@ -100,6 +100,7 @@ fragment repoProperties on Repository {
 template = (
     """{id}: repository(owner: "{owner}", name: "{repo}") {{...repoProperties}}"""
 )
+
 rate_limit_info = "rateLimit {cost remaining resetAt}"
 headers = {
     "Authorization": f"Bearer {wmill.get_variable('u/autumn/github_key')}",
@@ -183,7 +184,7 @@ def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[str]) -> dict[kf, dict
             if (val := field_getter(r_json)) is not None:
                 out[grist_field] = val 
         records[urlunparse(i)] = out
-    
+
     github_urls: list[tuple[str, str]] = [
         (rmatch[1], rmatch[2])
         for url in repo_urls

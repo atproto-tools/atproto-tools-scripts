@@ -386,6 +386,14 @@ class Collector:
                 ),
             )
             for url, fields in repos_metadata.items():
+                if (homepage := fields.get('homepageUrl')) and url in self.sites:
+                    old_hyperlink = f'https://atproto-tools.getgrist.com/p2SiVPSGqbi8/main-list/p/9#a1.s27.r{self.sites[url]['id']}'
+                    log.warning(f'found rendundant site {old_hyperlink} for new site {homepage}')
+                    #TODO a conflict like this needs manual review, set up a webhook to properly notify. discord or smth
+                
+                if (homepage := fields.get('homepageUrl')) and url in self.sites_records:
+                    self.sites_records[homepage] = self.sites_records.pop(url)
+
                 self.repos_records[url][gf.FIELDS] |= fields
             
             authors_metadata = fetch_authors(

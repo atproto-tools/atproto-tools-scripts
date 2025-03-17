@@ -14,8 +14,9 @@ out_template = """
 [view your entry here](https://atproto-tools.getgrist.com/p2SiVPSGqbi8/main-list/p/9#a1.s27.r{rec_id}).
 """
 submissions_field = "submissions"
-#TODO for now, only one URL per submission, and it must be a new url. if we can figure out how to set a cookie from the web form, we can allow edits (since it allows ownership)
-#TODO #blocked once tags are unified, add a tag selector (via cached net request in wmill)
+#longterm for now, only one URL per submission, and it must be a new url. if we can figure out how to set a cookie from the web form, we can allow edits (since it allows ownership)
+#todo clear url 
+#blocked once tags are unified, add a tag selector (via cached net request in wmill)
 def main(url: str | None, name: str | None = None, desc: str | None = None, repo: str | None = None, author: str | None = None, lexicon: str | None = None):
     c = Collector("Submission_form", fields = [ef.NAME, ef.DESC, submissions_field], add_repos=True, write_meta=True, fetch_authors=True)
     log.info("collector init")

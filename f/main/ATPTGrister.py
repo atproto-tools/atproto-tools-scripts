@@ -46,7 +46,7 @@ def normalize(url: str) -> kf:
     if url.find("://") == -1:
         url = "https://" + url
     parsed = urlparse(url)
-    #TODO catch more tracking params, maybe look for a library?
+    #longterm catch more tracking params, maybe look for a library?
     query = urlencode([
         i for i in parse_qsl(parsed.query)
         if not re.match('(?:utm_|fbclid|gclid|ref$).*', i[0])
@@ -182,7 +182,6 @@ class CustomGrister(GristApi):
         resp =  super().apicall(url, method, headers, params, json, filename)
         if self.resp_code != 200:
             raise IOError(
-                #TODO add all the memos to the access rules in the table
                 self.resp_code, f"{self.resp_reason}: {self.resp_content}"
             )
         return resp

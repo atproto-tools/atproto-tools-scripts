@@ -35,7 +35,7 @@ def check_lex_rec(raw: str) -> tuple[str, str | None] | None:
     try:
         parse_error = None
         lex = lexicon_parse(lex_json)
-        #TODO add support for lexicon revisions etc
+        #longterm add support for lexicon revisions etc
         for lex_def in lex.defs.values():
             if lex_def.type == 'record':
                 if nsid := nsid_regex.match(lex.id):
@@ -44,7 +44,7 @@ def check_lex_rec(raw: str) -> tuple[str, str | None] | None:
                     return lex.id, parse_error
                 else:
                     log.error(f"found lex {lex.id} but it's not valid!")
-    except ValidationError as e: #TODO speaking of, why doesn't it raise 
+    except ValidationError as e:
         parse_error = json.dumps(e.errors())
         log.error(e)
 

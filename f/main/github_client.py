@@ -69,14 +69,14 @@ query {
 
 line_template = Template('$id: object(expression: "$branch:$path") { ... on Blob { text } }')
 
-def get_repo_files(url: str, paths: list[str], callback: Optional[Callable[[str], Any]], batch_size = 32):
+def get_repo_files(url: str, paths: list[str], batch_size = 32) -> dict[str, str]:
     
     u = url_obj(url)
     owner, repo, _, branch, *_ = u.path
     if not all((owner, repo, branch)):
         raise ValueError('improperly formatted url')
     
-    out: dict[str, dict[str, Any]] = {}
+    out: dict[str, str] = {}
 
     for num_req, batch in enumerate(batched(paths, batch_size)): 
         lines = "    \n".join(
@@ -94,18 +94,10 @@ def get_repo_files(url: str, paths: list[str], callback: Optional[Callable[[str]
         log.info("rate limit: " + str(data.pop("rateLimit", None)))
         if errors := data.pop("errors", None):
             log.error(f"error fetching github files:\n{pformat(errors)}")
-
-        if callback:
-            batch_results = {
-                paths[int(id.strip('r'))]: callback_res
-                for id, entry in data["repository"].items()
-                if (callback_res := callback(entry["text"])) is not None
-            }
-        else:
-            batch_results = {
-                paths[int(id.strip("r"))]: entry["text"]
-                for id, entry in data["repository"].items()
-            }
+        batch_results = {
+            paths[int(id.strip("r"))]: entry["text"]
+            for id, entry in data["repository"].items()
+        }
 
         out |= batch_results
 

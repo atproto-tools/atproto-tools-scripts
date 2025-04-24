@@ -258,11 +258,11 @@ class Collector:
             normal_site = normalize(entry)
 
         if not (out_fields.get(ef.NAME) and out_fields.get(ef.DESC)):
-            fetched_name, fetched_desc = fetch_site_meta(og_url)
-            if not out_fields.get(ef.NAME):
-                out_fields[self._prefix + ef.NAME] = fetched_name
-            if not out_fields.get(ef.DESC):
-                out_fields[self._prefix + ef.DESC] = fetched_desc
+            fetched_title, fetched_desc = fetch_site_meta(og_url)
+            if fetched_title and not out_fields.get(ef.NAME):
+                out_fields[sm_fields.TITLE] = fetched_title
+            if fetched_desc and not out_fields.get(ef.DESC):
+                out_fields[sm_fields.DESC] = fetched_desc
         
         if self._add_repos_opt and (normal_repo := check_repo(normal_site)):
             out_fields[ef.URL], normal_site = self.add_repo_site(normal_repo, normal_repo)
@@ -388,7 +388,7 @@ class Collector:
             for url, fields in repos_metadata.items():
                 if (homepage := fields.get('homepageUrl')) and url in self.sites:
                     old_hyperlink = f"https://atproto-tools.getgrist.com/p2SiVPSGqbi8/main-list/p/9#a1.s27.r{self.sites[url]['id']}"
-                    log.warning(f'found rendundant site {old_hyperlink} for new site {homepage}')
+                    log.warning(f"found rendundant site entry {old_hyperlink} for new site {homepage}")
                     #TODO a conflict like this needs manual review, set up a webhook to properly notify. discord or smth
                 
                 if (homepage := fields.get('homepageUrl')) and url in self.sites_records:

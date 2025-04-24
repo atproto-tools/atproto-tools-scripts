@@ -1,14 +1,22 @@
 import requests
 from bs4 import BeautifulSoup, Tag
 import re
+from enum import StrEnum
 from f.main.boilerplate import get_timed_logger
-log = get_timed_logger(__file__)
+log = get_timed_logger(__name__)
+
+class sm_fields(StrEnum):
+    TITLE = "website_title"
+    DESC = "website_desc"
 
 def clean_title(title: str, url: str):
     if url.startswith("https://github.com"):
         title = re.sub(r"GitHub - [^/]+/[^:]+: ", "", title)
     return title
 
+spammy_descriptions = [
+    re.compile(r"development by creating an account on GitHub\.$")
+]
 
 #TODO add rel-alternate atproto links
 #TODO add fetching the H1 of the README when we detect a git repo
@@ -42,7 +50,15 @@ def fetch_site_meta(url: str) -> tuple[str | None, str | None]: # thank u claude
                 description = str(name_desc['content'])
             else:
                 description = None
-        log.debug(f'fetched site {url}\ntitle: {title}\ndesc:  {description}')
+
+        if description:
+            for i in spammy_descriptions:
+                if i.search(description):
+                    description = None
+                    break
+
+        log.debug(f'fetched site {url}\ntitle: {title}' + (f'\ndesc:  {description}' if description else ''))
+
         return (title, description)
 
     except requests.RequestException as e:
@@ -62,14 +78,14 @@ def main():
         out_fields = out[gf.FIELDS]
         fetched_name, fetched_desc = fetch_site_meta(site_rec['url'])
         if fetched_name:
-            out_fields["website_title"] = fetched_name
+            out_fields[sm_fields.TITLE] = fetched_name
         if fetched_desc:
-            out_fields["website_desc"] = fetched_desc
+            out_fields[sm_fields.DESC] = fetched_desc
         if out_fields:
             out_recs.append(out)
     g.add_update_records("Sites", out_recs)
     return {"table-row-object": [rec[gf.FIELDS] | rec[gf.KEY] for rec in out_recs]}
 
 if __name__ == "__main__":
-    # fetch_site_meta("https://blueskycounter.com/")
-    main()
+    print(fetch_site_meta("https://verify.aviary.domains/"))
+    # main()

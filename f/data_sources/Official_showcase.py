@@ -23,7 +23,7 @@ def main() -> dict[str, list]:
         og_tags_key[og_tag] = og_fields.pop("label")
 
     c = Collector("Official_showcase", [ef.NAME, ef.DESC, ef.TAGS, ef.RATING], tags, True, fetch_authors=True)
-    raw_entries = re.search(r"User\[\] = (\[\n{.*?\n\])", raw_file, re.S).group(1) # type: ignore
+    raw_entries = re.search(r"const Users: User\[\] = (\[\n.*?\n\])", raw_file, re.S).group(1) # type: ignore
     assert isinstance(raw_entries, str)
     
     # sample entry for reference-
@@ -48,8 +48,8 @@ def main() -> dict[str, list]:
         if "website" not in entry: # fix your data guys! https://github.com/bluesky-social/bsky-docs/blob/main/src/data/users.tsx#L846
             entry["website"] = entry["source"] 
 
-        if entry["source"] in excluded_repos:
-            del entry["source"]
+        if entry.get("source") in excluded_repos:
+            continue
 
         # additional check if entry[v] is truthy because for some reason there is an explicit null at https://github.com/bluesky-social/bsky-docs/blob/main/src/data/users.tsx#L808
         fields = {k: entry[v] for k,v in field_key.items() if v in entry and entry[v]}
@@ -72,4 +72,5 @@ def main() -> dict[str, list]:
     return c.output()
 
 if __name__ == "__main__":
+
     main()

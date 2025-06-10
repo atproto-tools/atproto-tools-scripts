@@ -1,9 +1,11 @@
 # boilerplate for basic functinality? in MY python??
+from collections import defaultdict
+from collections.abc import MutableMapping
 import logging
 import random
 import time
 import os
-from typing import Iterable
+from typing import Any, Iterable, Mapping, TypeVar, TypedDict
 # TODO consider switching to a different parsing lib https://sethmlarson.dev/why-urls-are-hard-path-params-urlparse
 from urllib.parse import urlparse, parse_qsl, unquote, urlunparse
 
@@ -71,7 +73,6 @@ def get_timed_logger(name: str = "", level: str | int = "INFO") -> TimedLoggerAd
     logger.addHandler(handler)
     return TimedLoggerAdapter(logger)
 
-
 def add_one_missing(dest: list[str], item: str | None):
     if not item:
         return dest
@@ -134,14 +135,81 @@ class url_obj:
             for k in ["scheme", "netloc", "path", "query", "fragment"]
         }
 
+def dict_filter_falsy[D: dict](d: D) -> D:
+    return type(d)({k: v for k, v in d.items() if v})
+
+def recursive_defaultdict():
+    return defaultdict(recursive_defaultdict)
+
+class truthy_only_dict[K, V](dict[K, V]):
+    def __init__(self, m: Mapping[K, V] | None = None, *args, **kwargs):
+        if m:
+            filtered = {k: v for k, v in m if v}
+            return super().__init__(filtered, *args, **kwargs)
+        super().__init__(*args, **kwargs)
+        # Filter out falsy values
+        self._filter_falsy_values()
+
+    def __setitem__(self, key: K, value: V):
+        if value:
+            super().__setitem__(key, value)
+
+    def _filter_falsy_values(self):
+        # Remove falsy values from the dictionary
+        keys_to_remove = [k for k, v in self.items() if not v]
+        for k in keys_to_remove:
+            del self[k]
+
+
+def dicts_diff(source: Mapping[Any, Any], dest: Mapping[Any, Any]):
+    """Returns a dict of elements in dest that are missing or differ from their counterparts in source.\n\nTreats all falsy values as equal"""
+    diff = {}
+
+    if missing_keys := source.keys() - dest.keys():
+        print(f"keys in source that are missing from dest: {missing_keys}")
+
+    for key, dest_val in dest.items():
+        source_val = source.get(key)
+
+        if not source_val and not dest_val:
+            continue
+        
+        if isinstance(dest_val, dict):
+            if nested_diff := dicts_diff(source_val or {}, dest_val):
+                # print(f"found diff in subdicts at {key}:\n{source_val}\nwith\n{dest_val}")
+                diff[key] = nested_diff
+        elif source_val != dest_val:
+            # print(f"found mismatched vals for {key}:\n{source_val}\n---\n{dest_val}")
+            diff[key] = dest_val
+
+    # if diff:
+        # print(f"returning {diff}")
+    return diff
+
 if __name__ == "__main__":
-    a = get_timed_logger(__file__)
-    # b = get_timed_logger()
-    # a.info("test")
-    # time.sleep(1)
-    # a.info("after 1s")
-    # a.info("instant")
-    # b.info("after 1 s")
-    u = url_obj('http://google.com/path?q=query')
-    print(u.dict)
-    print(u.unparse())
+    import json
+    a = json.loads("""{
+  "lexicon": 1,
+  "id": "app.bsky.feed.like",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "Record declaring a 'like' of a piece of subject content.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["subject", "createdAt"],
+        "properties": {
+          "subject": { "type": "ref", "ref": "com.atproto.repo.strongRef" },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "via": { "type": "ref", "ref": "com.atproto.repo.strongRef" }
+        }
+      }
+    }
+  }
+}""")
+
+    b = json.loads("""{"id":"app.bsky.feed.like","defs":{"main":{"key":"tid","type":"record","record":{"type":"object","required":["subject","createdAt"],"properties":{"subject":{"ref":"com.atproto.repo.strongRef","type":"ref"},"createdAt":{"type":"string","format":"datetime"}}},"description":"Record declaring a 'like' of a piece of subject content."}},"$type":"com.atproto.lexicon.schema","lexicon":1}""")
+
+    # print("final", dicts_diff({"a": {"b": "c"}}, {"a": {"b": "c"}}))
+    print("final", dicts_diff(b, a))

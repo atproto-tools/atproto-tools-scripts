@@ -2,10 +2,10 @@ from collections import defaultdict
 from enum import StrEnum
 from pprint import pp
 from typing import Any, Iterable, cast
+from atproto import IdResolver
 from pygrister.api import GristApi
 from wmill import get_variable as wmill_var
-from atproto import IdResolver
-from json import loads
+import json
 import re
 from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
 from datetime import datetime, timedelta
@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from f.main.boilerplate import add_missing, get_timed_logger
 utc = ZoneInfo("UTC")
 resolver = IdResolver()
-log = get_timed_logger(__file__, 'debug')
+log = get_timed_logger(__name__, 'debug')
 
 class t(StrEnum):
     """atproto-tools table names"""
@@ -35,14 +35,14 @@ class kf(StrEnum):
     HANDLE = "handle"
     NORMAL_URL = "normalized_url"
     NORMAL_HOME = "normalized_homepage"
-    NAME = "name"
+    ID = "id"
 
 class mf(StrEnum):
     """metadata fields"""
     POLLED = "last_polled"
     STATUS = "status"
 
-def normalize(url: str) -> kf:
+def normalize_url(url: str) -> kf:
     if url.find("://") == -1:
         url = "https://" + url
     parsed = urlparse(url)
@@ -65,7 +65,7 @@ def make_timestamp(timestamp: str | int | float):
     else:
         return int(timestamp)
 
-def check_stale(timestamp: str | int | float| None, stale_threshold: int = 2) -> bool:
+def check_stale(timestamp: str | int | float| None, stale_threshold: float = 2) -> bool:
     """
     returns whether a given UTC timestamp is stale and the current UTC timestamp
 
@@ -77,18 +77,20 @@ def check_stale(timestamp: str | int | float| None, stale_threshold: int = 2) ->
         return True
     timestamp = make_timestamp(timestamp)
     delta = datetime.now(utc) - datetime.fromtimestamp(timestamp, utc)
+    log.debug(f"got timestamp {timestamp} with threshold {stale_threshold}. delta is {delta}")
     return delta >= timedelta(days=stale_threshold)
 
-did_regex = r"(?:did:[a-z0-9]+:(?:(?:[a-zA-Z0-9._-]|%[a-fA-F0-9]{2})*:)*(?:[a-zA-Z0-9._-]|%[a-fA-F0-9]{2})+)(?:[^a-zA-Z0-9._-]|$)"
+strict_did_regex= r"^did:(?P<method>[a-z0-9]+):(?P<identifier>(?:(?:[a-zA-Z0-9._\-]|%[a-fA-F0-9]{2})*:)*(?:[a-zA-Z0-9._-]+|%[a-fA-F0-9]{2})+)$"
+did_regex = r"(?P<did>did:(?P<method>[a-z0-9]+):(?P<identifier>(?:(?:[a-zA-Z0-9._\-]|%[a-fA-F0-9]{2})*:)*(?:[a-zA-Z0-9._-]+|%[a-fA-F0-9]{2})+))(?:[^a-zA-Z0-9._-]|$)"
 #TODO support other clients besides bsky.app such as ouranos. maybe use code from pdsls redirector extension
 handle_regexes = {
-    r"^(?:https://)?((?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)/?$",
+    r"^((?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)?(?P<second_level>(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)[a-zA-Z](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?))$",
     r"bsky\.app/profile/([^/]*)",
 }
 def match_handle(author) -> kf | None:
     for pattern in handle_regexes:
         if author_match := re.search(pattern, author):
-            return author_match[1] #type: ignore
+            return author_match[1] #type: ignore    
 
 class CustomGrister(GristApi):
     def __init__(self, config: dict[str, str] | None = None, in_converter: dict | None = None, out_converter: dict | None = None, request_options: dict | None = None, fetch_authors = False):
@@ -98,7 +100,7 @@ class CustomGrister(GristApi):
         if not fetch_authors:
             return
         authors_by_did: dict[kf, dict[str, dict[str, Any]]] = defaultdict(dict)
-        invalid_dids = []
+        invalid_dids: dict[kf, dict[str, Any]] = {}
         old_records: list[dict[str, Any]] = self.list_records(t.AUTHORS)[1]
         for row in old_records:
             handle: kf | None = row.get(kf.HANDLE)
@@ -117,7 +119,7 @@ class CustomGrister(GristApi):
                     log.info(f'fetched {did} for handle {handle}')
                 else:
                     log.warning(f'no did for handle {handle}')
-                    invalid_dids.append({'id': row['id'], "invalid_did": True})
+                    invalid_dids[row['id']] = {"unreachable_did": True}
                     continue
             elif not did: # and no handle, logically. but the type checker didn't get the logic
                 log.error(f"record id {row['id']} has no valid handle or did")
@@ -169,13 +171,22 @@ class CustomGrister(GristApi):
                 }
                 for rec in merged_authors
             ]
-            merged_authors += [{gf.KEY: {kf.HANDLE}, gf.FIELDS: rec} for rec in invalid_dids]
+            merged_authors += self.make_records(invalid_dids, kf.ID)
             pp(merged_authors)
             # for i in merged_authors:
             #     log.debug(f'POSTing {i[gf.KEY]}')
             #     pp(i[gf.FIELDS])
             #     self.add_update_records(t.AUTHORS, [i])
             self.add_update_records(t.AUTHORS, merged_authors)
+
+    def make_records(self, entries: dict[kf, dict[str, Any]], rec_key: str):
+        return [
+            {
+                gf.KEY: {rec_key: entry.get(rec_key) or key},
+                gf.FIELDS: entry,
+            }
+            for key, entry in entries.items()
+        ]
 
     """raises IOError with the request response on http error"""
     def apicall(self, url: str, method: str = 'GET', headers: dict | None = None, params: dict | None = None, json: dict | None = None, filename: str = '') -> tuple[int, Any]:
@@ -230,7 +241,7 @@ class CustomGrister(GristApi):
             return cast(kf, handle)
 
     def _fetch_did(self, handle: str) -> kf | None:
-        """better to use self.resolve_author since it has a cache"""
+        """usually better to use self.resolve_author since it has a cache"""
         if out := resolver.handle.resolve(handle):
             return cast(kf, out)
 
@@ -244,7 +255,6 @@ class CustomGrister(GristApi):
                 self._new_authors_records[did] =  {gf.KEY: {kf.DID: did}}
         elif author_handle := match_handle(author):
             if did := self.authors_lookup.get(author_handle, {}).get(kf.DID):
-                log.debug(f'cache hit for {author_handle} did lookup')
                 pass
             elif resp := self._fetch_did(author_handle):
                 did = cast(kf, resp)
@@ -272,11 +282,27 @@ class CustomGrister(GristApi):
             )
         self._new_authors_records.clear()
 
+names_col = "names"
+site_source_name = "site"
+"""used in the names_col record as a dummy source name where we store the ogl data"""
+
+out_converters = {
+    t.SITES: {
+        names_col: lambda x: json.loads(x) if x else {site_source_name: {}},
+    }
+}
+
+in_converters = {
+    t.SITES: {
+        names_col: json.dumps,
+    }
+}
+
 def ATPTGrister(fetch_authors = False) -> CustomGrister:
     """Get configured GristApi client"""
-    grist_config = loads(wmill_var("f/main/grist_config"))
+    grist_config = json.loads(wmill_var("f/main/grist_config"))
     grist_config["GRIST_API_KEY"] = wmill_var("u/autumn/GRIST_API_KEY")
-    return CustomGrister(grist_config, fetch_authors=fetch_authors)
+    return CustomGrister(grist_config, fetch_authors=fetch_authors, in_converter=in_converters, out_converter=out_converters)
 
 if __name__ == "__main__":
     g = ATPTGrister(True)

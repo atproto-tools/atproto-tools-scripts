@@ -1,21 +1,17 @@
 import wmill
-from f.main.Collector import Collector, t, kf, ef, normalize
-from f.main.boilerplate import get_timed_logger
+from f.main.Collector import Collector, t, kf, ef, normalize_url
+from f.main.boilerplate import get_timed_logger, dict_filter_falsy
 log = get_timed_logger("submission form")
 
-#TODO other sanitization? idk what the risks are
+#longterm ask about other sanitization? idk what the risks are
 def clean_url(url: str) -> kf:
-    return normalize(url.strip())
-
-def filter_falsy(d: dict):
-    return {k: v for k,v in d.items() if v} # gotta 'cast to null' to keep blank/empty values uniform in all tables
+    return normalize_url(url.strip())
 
 out_template = """
 [view your entry here](https://atproto-tools.getgrist.com/p2SiVPSGqbi8/main-list/p/9#a1.s27.r{rec_id}).
 """
 submissions_field = "submissions"
 #longterm for now, only one URL per submission, and it must be a new url. if we can figure out how to set a cookie from the web form, we can allow edits (since it allows ownership)
-#todo clear url when button clicked
 #blocked once tags are unified, add a tag selector (via cached net request in wmill)
 def main(url: str | None, name: str | None = None, desc: str | None = None, repo: str | None = None, author: str | None = None, lexicon: str | None = None):
     c = Collector("Submission_form", fields = [ef.NAME, ef.DESC, submissions_field], add_repos=True, write_meta=True, fetch_authors=True)
@@ -27,7 +23,7 @@ def main(url: str | None, name: str | None = None, desc: str | None = None, repo
     submissions = 0
     if url:
         if not c.sites.get(url):
-            new_record = filter_falsy({
+            new_record = dict_filter_falsy({
                 ef.URL: url,
                 submissions_field: 1,
                 ef.NAME: name,
@@ -41,7 +37,7 @@ def main(url: str | None, name: str | None = None, desc: str | None = None, repo
             submissions = (old_s := old_record.get(c._prefix + submissions_field)) and old_s + 1 or 1
             new_record = {
                 ef.URL: url,
-                #TODO add in column info as a possible field in the collector constructor fields dict param
+                #longterm add in column info as a possible field in the collector constructor fields dict param
                 submissions_field: submissions,
                 ef.NAME: old_record.get("Computed_Name") or name,
                 ef.DESC: old_record.get("Computed_Description") or desc,
@@ -71,15 +67,15 @@ if __name__ == "__main__":
             # name="atproto tools",
             # desc="open database of the atproto ecosystem"
         ),
-        main(
-            url="https://atproto-tools.getgrist.com/p2SiVPSGqbi8/",
-            repo="https://github.com/atproto-tools/atproto-tools-scripts/",
-            author="aeshna-cyanea.bsky.social",
-            name="atproto tools",
-            desc="custom description - overly verbose and longer than the one from the github repo"
-        ),
-        main(
-            url="https://atproto-tools.getgrist.com/p2SiVPSGqbi8/",
-            desc="even more custom description - overly verbose and longer than the one from the github repo"
-        ),
+        # main(
+        #     url="https://atproto-tools.getgrist.com/p2SiVPSGqbi8/",
+        #     repo="https://github.com/atproto-tools/atproto-tools-scripts/",
+        #     author="aeshna-cyanea.bsky.social",
+        #     name="atproto tools",
+        #     desc="custom description - overly verbose and longer than the one from the github repo"
+        # ),
+        # main(
+        #     url="https://atproto-tools.getgrist.com/p2SiVPSGqbi8/",
+        #     desc="even more custom description - overly verbose and longer than the one from the github repo"
+        # ),
     )

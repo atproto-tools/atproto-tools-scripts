@@ -1,0 +1,5 @@
+python>=3.13
+atproto
+beautifulsoup4
+pygrister
+https://github.com/atproto-tools/atproto-link-translator/archive/refs/heads/main.zip

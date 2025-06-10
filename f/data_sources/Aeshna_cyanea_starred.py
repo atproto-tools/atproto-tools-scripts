@@ -34,7 +34,7 @@ query getList($after: String) {
 
 
 def main():
-    c = Collector("Aeshna_cyanea_starred", fields=[ef.DESC])
+    c = Collector("Aeshna_cyanea_starred")
 
     headers = {
         "Authorization": f"Bearer {wmill.get_variable('u/autumn/github_key')}",
@@ -61,11 +61,9 @@ def main():
                 ef.URL: homepage,
                 ef.REPO: repo_url
             }
-            if desc := node["description"]:
-                entry[ef.DESC] = desc
             c.add_site(entry)
-            if not after_cursor:
-                break
+        if not after_cursor:
+            break
     return c.output()
 
 if __name__ == "__main__":

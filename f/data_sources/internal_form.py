@@ -1,16 +1,14 @@
 import os
+import re
 import wmill
-from f.main.Collector import Collector, t, gf, kf, ef, normalize, ATPTGrister
+from f.main.Collector import Collector, t, gf, kf, ef, normalize_url, ATPTGrister
 from f.main.lex_enum import lex
-from f.main.boilerplate import get_timed_logger
-log = get_timed_logger(__file__)
+from f.main.boilerplate import get_timed_logger, dict_filter_falsy
+log = get_timed_logger(__name__)
 
 #longterm other sanitization? idk what the risks are
 def clean_url(url: str) -> kf:
-    return normalize(url.strip())
-
-def filter_falsy(d: dict):
-    return {k: v for k,v in d.items() if v} # gotta 'cast to null' to keep blank/empty values uniform in all tables
+    return normalize_url(url.strip())
 
 submitter = os.environ["WM_USERNAME"]
 if submitter:
@@ -18,7 +16,7 @@ if submitter:
 sg = ATPTGrister(False)
 
 # not sure if this is the best approach (blindly sending a post request). but it seems like the most efficient unless we want to add all new authors manually to Data_Sources
-sg.add_update_records(t.SOURCES, [{gf.KEY: {"source_name": submitter}, gf.FIELDS: {"label": submitter + " form"}}])
+sg.add_update_records(t.SOURCES, [{gf.KEY: {"source_name": submitter}, gf.FIELDS: {"label": submitter + "_form"}}])
 
 out_template = """
 [view your entry here](https://atproto-tools.getgrist.com/p2SiVPSGqbi8/main-list/p/9#a1.s27.r{rec_id}).
@@ -30,7 +28,7 @@ def main(url: str | None, name: str | None = None, desc: str | None = None, repo
     c.g.update_config({'GRIST_API_KEY': wmill.get_variable(path="u/autumn/grist_form_key")})
     url, repo = url and clean_url(url), repo and clean_url(repo)
     if url:
-        new_record = filter_falsy({
+        new_record = dict_filter_falsy({
             ef.URL: url,
             ef.NAME: name,
             ef.DESC: desc,
@@ -47,19 +45,17 @@ def main(url: str | None, name: str | None = None, desc: str | None = None, repo
     return {"markdown": out}
 
 if __name__ == "__main__":
-    main(
-            url="https://bookhive.buzz",
-            repo="https://github.com/nperez0111/bookhive/",
-            author="https://bsky.app/profile/bookhive.buzz",
-            # name="atproto tools",
-            # desc="open database of the atproto ecosystem",
-            # lexicon=lex.UNIVERSAL
-        )
-    main(
-            url="https://atproto-tools.getgrist.com/p2SiVPSGqbi8/",
-            repo="https://github.com/atproto-tools/atproto-tools-scripts/",
-            author="aeshna-cyanea.bsky.social",
-            # name="atproto tools",
-            # desc="open database of the atproto ecosystem",
-            lexicon=lex.BLUESKY
-        )
+    inp = """
+    url https://rocksky.app/
+    repo 
+    author 
+    name 
+    desc 
+    """
+    # inp += "lexicon " + str(lex.UNIVERSAL)
+    args = {
+        argmatch[1]: argmatch[2]
+        for line in inp.splitlines()
+        if (argmatch := re.search(r'(\w+)\s+([^\s]+)', line))
+    }
+    print(main(**args)) #type: ignore

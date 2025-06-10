@@ -1,91 +1,108 @@
+from copy import deepcopy
+from datetime import UTC, datetime
+from typing import Any, Literal, TypedDict, cast
 import requests
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup, Tag, NavigableString
 import re
-from enum import StrEnum
+from f.main.boilerplate import dicts_diff, dict_filter_falsy, truthy_only_dict
+from f.main.ATPTGrister import ATPTGrister, check_stale, gf, kf, names_col, site_source_name
 from f.main.boilerplate import get_timed_logger
 log = get_timed_logger(__name__)
 
-class sm_fields(StrEnum):
-    TITLE = "website_title"
-    DESC = "website_desc"
-
-def clean_title(title: str, url: str):
+def clean_title(title: str | None, url: str):
+    if not title:
+        return ""
     if url.startswith("https://github.com"):
         title = re.sub(r"GitHub - [^/]+/[^:]+: ", "", title)
     return title
 
-spammy_descriptions = [
-    re.compile(r"development by creating an account on GitHub\.$")
-]
+def clean_description(desc: str | None, url: str):
+    if not desc:
+        return ""
+    if re.search(r"development by creating an account on GitHub\.$", desc):
+        return ""
+    return desc
+
+class site_info(TypedDict, total=False):
+    title: str
+    desc: str
+    error: str
 
 #TODO add rel-alternate atproto links
 #TODO add fetching the H1 of the README when we detect a git repo
-def fetch_site_meta(url: str) -> tuple[str | None, str | None]: # thank u claude
+def fetch_site_meta(url: str) -> site_info:
     try:
+        out: site_info = {}
         response = requests.get(url)
+        if not response.ok:
+            out["error"] = response.reason
+            return out
         response.raise_for_status() 
         # some of the sites i tested returned improperly decoded chars by default, for example https://publer.com
         # apparently this is intentional https://github.com/psf/requests/issues/1604
-        # therefore, by executive fiat
+        # therefore, by executive fiat:
         response.encoding = 'utf-8'
         # response.encoding = response.apparent_encoding # https://stackoverflow.com/a/58578323/592606
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # why do people do this (name attrinstead of property as in the spec) :|
-        og_title = soup.find('meta', attrs={'property': 'og:title'}) or soup.find('meta', attrs={'name': 'og:title'})
-        og_description = soup.find('meta', attrs={'property': 'og:description'}) or soup.find('meta', attrs={'name': 'og:description'})
+        og_title_tag = (
+            soup.find('meta', attrs={'property': 'og:title'}) or
+            soup.find('meta', attrs={'name': 'og:title'})
+        )
 
-        if isinstance(og_title, Tag):
-            title = str(og_title['content'])
-        else:
-            title_tag = soup.find('title')
-            title = title_tag.string if isinstance(title_tag, Tag) else None
-        title = title and clean_title(title, url)
-        
-        if isinstance(og_description, Tag):
-            description = str(og_description['content'])
-        else:
-            name_desc = soup.find('meta', attrs={'name': 'description'})
-            if isinstance(name_desc, Tag):
-                description = str(name_desc['content'])
-            else:
-                description = None
+        if og_title_tag:
+            assert not isinstance(og_title_tag, NavigableString)
+            out["title"] = clean_title(str(og_title_tag['content']), url)
+        elif title_tag := soup.find('title'):
+            assert not isinstance(title_tag, NavigableString)
+            out["title"] = clean_title(title_tag.string, url)
 
-        if description:
-            for i in spammy_descriptions:
-                if i.search(description):
-                    description = None
-                    break
+        og_description = (
+            soup.find("meta", attrs={"property": "og:description"}) or
+            soup.find("meta", attrs={"name": "og:description"}) or
+            soup.find("meta", attrs={"name": "description"})
+        )
 
-        log.debug(f'fetched site {url}\ntitle: {title}' + (f'\ndesc:  {description}' if description else ''))
+        if og_description:
+            assert not isinstance(og_description, NavigableString)
+            out["desc"] = clean_description(og_description.attrs.get("content"), url)
+        elif og_description:
+            log.warning(f"description was not a tag: {og_description}")
 
-        return (title, description)
+        out = cast(site_info, dict_filter_falsy(cast(dict, out)))
+        log.debug(f"fetched site {url} : {out}")
+        return out
 
     except requests.RequestException as e:
-        log.error(f"An error occurred fetching {url}:\n{e}")
-        return (None, None)
+        log.error(f"error fetching {url}:\n{e}")
+        return {"error": str(e.strerror)}
+
+def check_and_fetch(rec: dict[str, Any], threshold: float = 3.2) -> dict[str, site_info] | None:
+    names = rec[names_col]
+    if check_stale(names[site_source_name].get("last_polled"), threshold):
+        return deepcopy(names) | {
+            site_source_name: {
+                "last_polled": datetime.now(UTC).isoformat(timespec="minutes"),
+                **fetch_site_meta(rec["url"]),
+            }
+        }
+
 
 def main():
-    from f.main.Collector import gf, kf, ATPTGrister
     g = ATPTGrister(False)
-    sites = [rec for rec in g.list_records("Sites")[1] if not rec["Computed_Name"] or not rec["Computed_Description"]]
-    out_recs = []
-    for site_rec in sites:
-        out = {
+    new_names = [
+        {
             gf.KEY: {kf.NORMAL_URL: site_rec[kf.NORMAL_URL]},
-            gf.FIELDS: {}
+            gf.FIELDS: {names_col: new_meta},
         }
-        out_fields = out[gf.FIELDS]
-        fetched_name, fetched_desc = fetch_site_meta(site_rec['url'])
-        if fetched_name:
-            out_fields[sm_fields.TITLE] = fetched_name
-        if fetched_desc:
-            out_fields[sm_fields.DESC] = fetched_desc
-        if out_fields:
-            out_recs.append(out)
-    g.add_update_records("Sites", out_recs)
-    return {"table-row-object": [rec[gf.FIELDS] | rec[gf.KEY] for rec in out_recs]}
+        for site_rec in g.list_records("Sites")[1]
+        if (new_meta := check_and_fetch(site_rec))
+    ]
+    if new_names:
+        g.add_update_records("Sites", deepcopy(new_names))
+        return {"table-row-object": [rec[gf.FIELDS][names_col][site_source_name] | rec[gf.KEY] for rec in new_names]}
+
 
 if __name__ == "__main__":
-    print(fetch_site_meta("https://verify.aviary.domains/"))
-    # main()
+    # fetch_site_meta("https://bsky.app")
+    print(main())

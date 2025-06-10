@@ -1,13 +1,12 @@
-import json
 from pprint import pformat
 from string import Template
-from typing import Callable, Any, Optional
+from typing import Any
 import wmill
 from f.main.boilerplate import get_timed_logger, batched, url_obj
 import time
 import httpx
 
-log = get_timed_logger()
+log = get_timed_logger(__name__)
 
 # https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28#about-secondary-rate-limits
 class GitHubRateLimitRetryTransport(httpx.BaseTransport): # thank u claude
@@ -42,7 +41,7 @@ class GitHubRateLimitRetryTransport(httpx.BaseTransport): # thank u claude
 
             if (retry_after := int(headers.get("retry-after", 0))) > 0:
                 log.warning(f"Secondary github rate limit hit. Waiting {retry_after} seconds. response body:\n{response.json()}")
-                time.sleep(retry_after)
+                time.sleep(retry_after + 1)
                 continue
 
             # If we get here, either we're not rate limited or we've waited and should return the response
@@ -79,13 +78,13 @@ def get_repo_files(url: str, paths: list[str], batch_size = 32) -> dict[str, str
     out: dict[str, str] = {}
 
     for num_req, batch in enumerate(batched(paths, batch_size)): 
-        lines = "    \n".join(
+        lines = "\n    ".join(
             line_template.substitute(id="r" + str(num_req * batch_size + i), branch=branch, path=path)
             for i, path in enumerate(batch)
         )
         query = outer_template.substitute(owner=owner, repo=repo, lines=lines, rate_limit_info=rate_limit_info)
 
-        log.debug(f'sending {query}')
+        log.debug(f'sending github query {query}')
         response = gh.post(
             "https://api.github.com/graphql", json={"query": query}
         )
@@ -102,7 +101,3 @@ def get_repo_files(url: str, paths: list[str], batch_size = 32) -> dict[str, str
         out |= batch_results
 
     return out
-
-
-if __name__ == "__main__": 
-    get_repo_files("https://github.com/bluesky-social/atproto/tree/main/", ['lexicons/app/bsky/feed/like.json','lexicons/app/bsky/graph/list.json'], lambda x: json.loads(x))

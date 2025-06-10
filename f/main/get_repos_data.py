@@ -1,5 +1,5 @@
+from datetime import datetime
 from enum import StrEnum
-from time import time
 from typing import Any, Iterable
 from urllib.parse import urlparse, urlunparse
 import requests
@@ -7,8 +7,16 @@ import wmill
 import pprint
 import re
 from f.main.ATPTGrister import ATPTGrister, CustomGrister, make_timestamp, t, kf, gf, mf, check_stale
-from f.main.boilerplate import batched
+from f.main.boilerplate import batched, dicts_diff
 from operator import itemgetter as getter
+
+forge_type_col = "forge_type"
+class forges(StrEnum):
+    GITHUB = "github"
+    GITLAB = "gitlab"
+    GITEA = "gitea"
+    TANGLED = "tangled"
+
 
 class rt(StrEnum):
     LICENSES = "Licenses"
@@ -107,7 +115,9 @@ headers = {
     "Content-Type": "application/json",
 }
 
-def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[str]) -> dict[kf, dict[str, Any]]:
+poll_timestamp = datetime.today().timestamp()
+
+def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[kf], old_records: dict[kf, dict[str, Any]] = {}) -> dict[kf, dict[str, Any]]:
     """
     fills in repo metadata to the Repos table. Quite slow - it reads/writes 3 additional tables (listed in the rt enum)
 
@@ -119,6 +129,8 @@ def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[str]) -> dict[kf, dict
     """
     if not repo_urls:
         return {}
+    if not old_records:
+        old_records  = {rec[kf.NORMAL_URL]: rec for rec in g.list_records(t.REPOS)[1]}
     records = {}
     ref_trackers = {}
     #TODO make these list requests async
@@ -143,16 +155,6 @@ def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[str]) -> dict[kf, dict
         tracker["entries"].append(fields)
         fields[ref_field_names[dest]] = val
 
-    #TODO support other forges. inquire about other popular ones. Gitlab doesn't seem to have a public api at all?
-    # codeberg/forgejo seems to generally support the old gitea api 1:1 for now. but gotta keep an eye out
-    gitea_domains = ["gitea.com", "git.syui.ai", "codeberg.org"]  # TODO store this in a wmill variable or smth
-    gitea_urls = [
-        parsed_url
-        for url in repo_urls
-        if (parsed_url := urlparse(url)).netloc in gitea_domains
-        and len(parsed_url.path.strip("/").split("/")) == 2
-    ]
-    
     gitea_field_key = { #thank u claude
         "homepageUrl": getter("website"),
         "description": getter("description"),
@@ -169,19 +171,24 @@ def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[str]) -> dict[kf, dict
         # Topics
         # "topics": "topics",  # GitHub has this nested under nodes. #TODO idk how to handle mapping them onto github topics
         
-        # License #TODO same problem, not sure how to map them to github equivalents
+        #TODO same problem, not sure how to map them to github equivalents
         # "licenses": "license",  # GitHub has this as a single license under licenseInfo
     }
 
     #TODO also add readme.md parsing
+    gitea_urls = [
+        urlparse(url)
+        for url in repo_urls
+        if old_records.get(url, {}).get(forge_type_col) == forges.GITEA
+    ]
     for i in gitea_urls:
         endpoint = urlunparse(i._replace(path="/api/v1/repos" + i.path))
         resp = requests.get(endpoint)
         resp.raise_for_status()
         r_json = resp.json()
-        out = {mf.POLLED: int(time())}
+        out = {mf.POLLED: int(poll_timestamp)}
         for grist_field, field_getter in gitea_field_key.items():
-            if (val := field_getter(r_json)) is not None:
+            if (val := field_getter(r_json)) is not None: # 0 is a valid value
                 out[grist_field] = val 
         records[urlunparse(i)] = out
 
@@ -212,68 +219,80 @@ def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[str]) -> dict[kf, dict
     for (owner, repo), resp in zip(github_urls, github_responses.values()):
         url = f"https://github.com/{owner}/{repo}"
         out: dict[str, Any] = {
-            mf.POLLED: int(time())
+            mf.POLLED: int(poll_timestamp)
         }
         if resp:
             for field, v in resp.items():
-                if v:
-                    #TODO redo this to a dict of lambdas maybe? but some of these are multiline and lambdas can't be. ask an experienced dev
-                    match field:
-                        #TODO iirc there was a lib to automate structural type hinting for graphql fields
-                        case "homepageUrl":
-                            out[field] = v
-                        case "description":
-                            out[field] = v
-                        case "isArchived":
-                            out[mf.STATUS] = "archived"
-                        case "defaultBranchRef":
-                            out["updatedAt"] = make_timestamp(v["target"]["committedDate"])
-                        case "latestRelease":
-                            out |= {"last_release_date": v["updatedAt"], "latest_version": v["name"]}
-                        case "owner": #TODO replace this with top X contributors. mb calculate X by whatever number is repsonsile for >80% of commits/prs
-                            if accounts := v.get("socialAccounts", {}).get("nodes"):
-                                for acc in accounts:
-                                    if acc["provider"] == "BLUESKY" and (did := g.resolve_author(acc["url"])):
-                                        add_refs(out, t.AUTHORS, did)
-                                        break #TODO some people have multiple bsky handles listed. handle this somehow idk
-                            if sponsor := v.get("sponsorsListing"):
-                                out["sponsor_url"] = sponsor["url"]
-                        case "createdAt":
-                            out[field] = make_timestamp(v)
-                        case "repositoryTopics":
-                            add_refs(
-                                out,
-                                rt.TOPICS,
-                                [node["topic"]["name"] for node in v["nodes"]],
-                            )
-                        case "forkCount":
-                            out[field] = v
-                        case "stargazerCount":
-                            out[field] = v
-                        case "issues":
-                            out[field] = v["totalCount"]
-                        case "pullRequests":
-                            out[field] = v["totalCount"]
-                        case "primaryLanguage":
-                            add_refs(out, rt.LANGUAGES, v["name"])
-                        case "licenseInfo":
-                            #TODO more fields for licenses
-                            add_refs(out, rt.LICENSES, v["name"])
-                        case "readme":
-                            if v and (text := v["text"]):
-                                # judgement call, sometimes people put meta stuff in the first few lines before the header
-                                lines: list[str] = text.splitlines()[:5]
-                                for line in lines:
-                                    if header := re.match(r"^##? (.*)", line):
-                                        out["readme_header"] = header[1]
-                                        break
-                        case "README":
-                            if v and (text := v["text"]):
-                                lines: list[str] = text.splitlines()[:5]
-                                for line in lines:
-                                    if header := re.match(r"^##? (.*)", line):
-                                        out["readme_header"] = header[1]
-                                        break
+                if not v:
+                    continue
+                #TODO redo this to a dict of lambdas maybe? but some of these are multiline and lambdas can't be. ask
+                match field:
+                    #TODO iirc there was a lib to automate structural type hinting for graphql fields
+                    case "homepageUrl":
+                        out[field] = v
+                    case "description":
+                        out[field] = v
+                    case "isArchived":
+                        out[mf.STATUS] = "archived"
+                    case "defaultBranchRef":
+                        out["updatedAt"] = make_timestamp(v["target"]["committedDate"])
+                    case "latestRelease":
+                        out |= {"last_release_date": v["updatedAt"], "latest_version": v["name"]}
+                    case "owner":
+                        if accounts := v.get("socialAccounts", {}).get("nodes"):
+                            for acc in accounts:
+                                if acc["provider"] == "BLUESKY" and (did := g.resolve_author(acc["url"])):
+                                    add_refs(out, t.AUTHORS, did)
+                                    break #TODO some people have multiple bsky handles listed. handle this somehow instead of just using the first one
+                        if sponsor := v.get("sponsorsListing"):
+                            out["sponsor_url"] = sponsor["url"]
+                    case "createdAt":
+                        out[field] = make_timestamp(v)
+                    case "repositoryTopics":
+                        add_refs(
+                            out,
+                            rt.TOPICS,
+                            [node["topic"]["name"] for node in v["nodes"]],
+                        )
+                    case "forkCount":
+                        out[field] = v
+                    case "stargazerCount":
+                        out[field] = v
+                    case "issues":
+                        out[field] = v["totalCount"]
+                    case "pullRequests":
+                        out[field] = v["totalCount"]
+                    case "primaryLanguage":
+                        add_refs(out, rt.LANGUAGES, v["name"])
+                    case "licenseInfo":
+                        #TODO more fields for licenses
+                        add_refs(out, rt.LICENSES, v["name"])
+                    case "readme":
+                        if v and (text := v["text"]):
+                            # judgement call, sometimes people put meta stuff in the first few lines before the header
+                            lines: list[str] = text.splitlines()[:5]
+                            for line in lines:
+                                if readme_heading := re.match(r"^##? (.*)", line):
+                                    out["readme_header"] = readme_heading[1]
+                                    break
+                    case "README":
+                        if v and (text := v["text"]):
+                            lines: list[str] = text.splitlines()[:5]
+                            for line in lines:
+                                if readme_heading := re.match(r"^##? (.*)", line):
+                                    out["readme_header"] = readme_heading[1]
+                                    break
+            contribs_count = 0
+            contribs_query = f"https://api.github.com/repos/{owner}/{repo}/contributors?per_page=100"
+            while True:
+                contribs_resp = requests.get(contribs_query, headers=headers)
+                contribs_data = contribs_resp.json() # for debugging
+                contribs_count += len(contribs_data)
+                if (link := contribs_resp.headers.get("link")) and (last_link_match := re.search(r'<(.*?)>; rel="last"', link)):
+                    contribs_query = last_link_match[1]
+                else:
+                    break
+            out["contributors"] = contribs_count or None
         else:
             out[mf.STATUS] = "not found"
         records[url] = out
@@ -303,24 +322,28 @@ def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[str]) -> dict[kf, dict
 def update_all_repos(g: CustomGrister | None = None, include_inactive: bool = True):
     g = g or ATPTGrister(fetch_authors=True)
     #TODO convert to sql query
-    all_repos = [
+    old_records_dict = {rec[kf.NORMAL_URL]: rec for rec in g.list_records("Repos")[1]}
+    urls = [
         i[kf.NORMAL_URL]
-        for i in g.list_records("Repos")[1]
+        for i in old_records_dict.values()
         if (
             # TODO if we start to get a large fraction of archived/deleted repos, move checking those to a separate (less frequent) job
-            include_inactive or not i.get(mf.STATUS)
-            and check_stale(i.get(mf.POLLED))
+            (include_inactive or not i.get(mf.STATUS)) and
+            check_stale(i.get(mf.POLLED))
         )
     ]
-    records = fetch_repo_data(g, all_repos)
-    assert records
-    g.add_update_records(t.REPOS, list(
-        {
-            gf.KEY: {kf.NORMAL_URL: url},
-            gf.FIELDS: v
+    if repo_data := fetch_repo_data(g, urls, old_records_dict):
+        diffs  = {
+            url: diff
+            for url, rec in repo_data.items()
+            if (diff := dicts_diff(old_records_dict[url], rec))
         }
-        for url, v in records.items()
-    ))
+        records = [
+            {gf.KEY: {kf.NORMAL_URL: url}, gf.FIELDS: diff}
+            for url, diff in diffs.items()
+        ]
+        if records:
+            g.add_update_records(t.REPOS, records)
 
 def main():
     update_all_repos()

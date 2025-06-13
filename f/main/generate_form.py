@@ -1,5 +1,10 @@
-from f.main.lex_enum import lex
-def main(custom_lexicon = False):
+from httpx import get
+
+def main(lex_limit: int | None = 16):
+
+    r = get("https://docs.getgrist.com/api/docs/p2SiVPSGqbi8oCHS24PnMj/tables/Lexicons/records?sort=manualSort")
+    t = r.json()
+    lexicons = [(i["fields"]["enum_name"], i["id"]) for i in t["records"][:lex_limit]]
     return {
         "type": "object",
         "order": [
@@ -63,10 +68,12 @@ def main(custom_lexicon = False):
                 "title": "Lexicon",
                 "default": None,
                 "Noneable": True,
-                "enumLabels": {lex_num: lex_name.lower() for lex_name, lex_num in lex._member_map_.items()},
-                "enum": list(lex._member_map_.values()),
+                "enumLabels": {i: lex_name for i, (lex_name, _) in enumerate(lexicons)},
+                "enum": [i[1] for i in lexicons],
                 "description": "",
-                "disableCreate": custom_lexicon
+                "disableCreate": True
             }
         }
     }
+
+print(main()["properties"]["lexicon"])

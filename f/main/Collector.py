@@ -1,6 +1,5 @@
 # py313
 from enum import StrEnum
-from itertools import zip_longest
 import re
 from typing import Iterable, Any, cast
 from pprint import pformat
@@ -204,17 +203,17 @@ class Collector:
             log.error(f"^ author of {normal_url}")
             return
 
-        if author_record := self.new_authors.get(did):
-            add_one_missing(author_record[t.SITES], normal_url)
+        if author_entry := self.new_authors.get(did):
+            add_one_missing(author_entry[t.SITES], normal_url)
         else:
-            out: dict[str, Any] = {
+            author_entry: dict[str, Any] | None = {
                 t.SITES: [normal_url],
                 t.SOURCES: self.add_source(self.authors, did),
             }
             if author != did:
-                out[kf.HANDLE] = author
-            self.new_authors[did] = out
-        return self.new_authors[did]
+                author_entry[kf.HANDLE] = author
+            self.new_authors[did] = author_entry
+        return author_entry
 
     def add_site(self, entry: dict | str):
         """
@@ -297,6 +296,9 @@ class Collector:
                     old_entries.get(key, {}).get(t.SITES) or ["L"],
                     [self.sites[i]["id"] for i in record[t.SITES]],
                 )
+        if table_id == t.AUTHORS: # crude, but this function is basically a superset of g.write_authors() so we override it
+            for did in self.g._new_authors_records.keys():
+                del self.authors[did]
         current_entries = {i for i,v in old_entries.items() if (sources := v.get(t.SOURCES)) and self._source_id in sources}
         if deleted_entries := current_entries - new_entries.keys():
             log.info(f"{table_id} not present in live {self._source_label}:\n{deleted_entries}")
@@ -391,6 +393,7 @@ class Collector:
         self.sites = {i[kf.NORMAL_URL]: i for i in self.g.list_records(t.SITES)[1]}
 
         if self.write_meta:
+            #TODO these can run in parallel
             from f.main.get_repos_data import fetch_repo_data
             from f.main.get_authors_data import fetch_authors
             repos_metadata = fetch_repo_data(

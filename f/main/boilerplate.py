@@ -161,11 +161,11 @@ class truthy_only_dict[K, V](dict[K, V]):
             del self[k]
 
 
-def dicts_diff(source: Mapping[Any, Any], dest: Mapping[Any, Any]):
+def dicts_diff(source: Mapping[Any, Any], dest: Mapping[Any, Any], verbose = False):
     """Returns a dict of elements in dest that are missing or differ from their counterparts in source.\n\nTreats all falsy values as equal"""
     diff = {}
 
-    if missing_keys := source.keys() - dest.keys():
+    if verbose and (missing_keys := source.keys() - dest.keys()):
         print(f"keys in source that are missing from dest: {missing_keys}")
 
     for key, dest_val in dest.items():

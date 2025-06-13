@@ -2,7 +2,6 @@ import os
 import re
 import wmill
 from f.main.Collector import Collector, t, gf, kf, ef, normalize_url, ATPTGrister
-from f.main.lex_enum import lex
 from f.main.boilerplate import get_timed_logger, dict_filter_falsy
 log = get_timed_logger(__name__)
 
@@ -16,7 +15,7 @@ if submitter:
 sg = ATPTGrister(False)
 
 # not sure if this is the best approach (blindly sending a post request). but it seems like the most efficient unless we want to add all new authors manually to Data_Sources
-sg.add_update_records(t.SOURCES, [{gf.KEY: {"source_name": submitter}, gf.FIELDS: {"label": submitter + "_form"}}])
+sg.add_update_records(t.SOURCES, [{gf.KEY: {"source_name": submitter}, gf.FIELDS: {"label": submitter + " form"}}])
 
 out_template = """
 [view your entry here](https://atproto-tools.getgrist.com/p2SiVPSGqbi8/main-list/p/9#a1.s27.r{rec_id}).
@@ -46,9 +45,9 @@ def main(url: str | None, name: str | None = None, desc: str | None = None, repo
 
 if __name__ == "__main__":
     inp = """
-    url https://rocksky.app/
+    url https://ufos.microcosm.blue/
     repo 
-    author 
+    author microcosm.blue
     name 
     desc 
     """
@@ -56,6 +55,6 @@ if __name__ == "__main__":
     args = {
         argmatch[1]: argmatch[2]
         for line in inp.splitlines()
-        if (argmatch := re.search(r'(\w+)\s+([^\s]+)', line))
+        if (argmatch := re.search(r'(\w+)\s+(.*)', line))
     }
     print(main(**args)) #type: ignore

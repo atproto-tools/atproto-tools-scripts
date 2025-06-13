@@ -1,5 +1,5 @@
 # ruff: noqa: E402 
-from typing import Any, Literal, Required, Optional, TypedDict, cast
+from typing import Any, Literal, Optional, TypedDict, cast
 from atproto_client.exceptions import AtProtocolError
 from pydantic import ValidationError
 from f.main.boilerplate import get_timed_logger, dicts_diff
@@ -11,8 +11,9 @@ from f.main.github_client import gh, get_repo_files
 from atproto_lexicon.parser import lexicon_parse
 import dns.resolver
 from atproto_client import Client as atproto_client
-from at_url_converter import convert, at_url, url_obj
-from at_url_converter.atproto_utils import find_record
+from atproto_client.models.base import ModelBase as atp_model
+from at_url_converter import at_url, url_obj
+import at_url_converter.atproto_utils as atproto_utils
 from httpx import Client as httpx_client
 http_client = httpx_client()
 at_client = atproto_client()
@@ -29,9 +30,8 @@ def resolve_nsid(nsid: str) -> Optional[at_url]:
     '''    
     split = nsid.split(".")[::-1]
     split[0] = "_lexicon"
-    unsplit = ".".join(split)
     try:
-        if (r := dns.resolver.resolve(unsplit, "TXT")) and (rrset := r.rrset):
+        if (r := dns.resolver.resolve( ".".join(split), "TXT")) and (rrset := r.rrset):
             if len(rrset) > 1:
                 log.error(f"rrset is too long, should be length 1:\n{rrset}")
         else:
@@ -71,6 +71,10 @@ class lex_record(lex_check_result, total=False):
     Lexicons: str
     name: str
 
+def rec_value(rec: atp_model) -> dict[str, Any]:
+    """gets the record value. strips extra keys inserted into the lexicon rec by the pds or pydantic"""
+    return {k: v for k, v in rec.model_dump()["value"].items() if k not in ("$type", "py_type")}
+
 def check_lex(input: str | dict)-> lex_check_result | None:
     if isinstance(input, str):
         input = cast(dict, json.loads(input))
@@ -87,15 +91,16 @@ def check_lex(input: str | dict)-> lex_check_result | None:
             nsid: str = input["id"]
             domain, name = nsid_match.groups()
             log.debug(f'got record for lex {name} of {domain}')
-            if nsid_url := resolve_nsid(input['id']):
+            if (nsid_url := resolve_nsid(input['id'])):
+                if input['id'] != nsid_url.rkey:
+                    log.warning(f"record's rkey {input['id']} did not match canonical rkey {nsid_url.rkey}")
                 try:
-                    resolved_record = at_client.com.atproto.repo.get_record({
+                    resolved_record = rec_value(at_client.com.atproto.repo.get_record({
                         "repo": nsid_url.repo,
                         "collection": "com.atproto.lexicon.schema",
                         "rkey": input['id']
-                    })
-                    resolved_rec_value: dict[str, Any] = {k: v for k, v in resolved_record.model_dump()["value"].items() if k not in ("$type", "py_type")}
-                    if diff := dicts_diff(resolved_rec_value, input):
+                    }))
+                    if diff := dicts_diff(resolved_record, input):
                         log.info(f"diff of repo's and resolved {nsid} lexicon:\n{diff}")
                         matched = "no"
                     else:
@@ -118,8 +123,9 @@ def check_lex(input: str | dict)-> lex_check_result | None:
     return None
 
 
+type forge = Literal["github", "gitea", "tangled", "pds"]
 
-async def find_lexicons(url: str, forge_type: Literal["github", "gitea", "tangled"], recs: dict[str, Any]) -> dict[str, lex_record]:
+async def find_lexicons(url: str, forge_type: forge) -> dict[str, lex_record]:
     out: dict[str, lex_record] = {}
     log.debug(f"searching for lexicons in {url}, forge type {forge_type}")
     if forge_type == "github":
@@ -146,10 +152,9 @@ async def find_lexicons(url: str, forge_type: Literal["github", "gitea", "tangle
                     "web_url": github_template.format(owner, repo_name, branch, path),
                     **lex_entry
                 }
-        return out
-    elif forge_type == "gitea": #TODO gitea
-        raise ValueError("{forge_type} type repos not implemented")
-    elif forge_type == "tangled": #TODO tangled
+    elif forge_type == "gitea": #TODO gitea (if we see a gitea lex repo) https://gitea.com/api/swagger#/repository/repoGetContents
+        raise NotImplementedError(f"{forge_type} repos not implemented")
+    elif forge_type == "tangled":
         u = url_obj(url)
         match u:
             case url_obj(path=[handle, repo_name]):
@@ -161,7 +166,7 @@ async def find_lexicons(url: str, forge_type: Literal["github", "gitea", "tangle
                 raise ValueError("unrecognized tangled url structure")
         metadata_repo = at_url(handle, "sh.tangled.repo")
         did = await metadata_repo.get_did()
-        if not (matched_rec := await find_record(metadata_repo, {"name": repo_name})):
+        if not (matched_rec := await atproto_utils.find_record(metadata_repo, {"name": repo_name})):
             raise StopIteration(f"repo with name {repo_name} not found in {metadata_repo}")
         knot = matched_rec["value"]["knot"]
         if not branch:
@@ -170,7 +175,7 @@ async def find_lexicons(url: str, forge_type: Literal["github", "gitea", "tangle
             r = http_client.get(q)
             data = r.json()
             branch = data["ref"]
-            url = url.rstrip("/") + f"/tree/{branch}"
+            url = url.rstrip("/") + "/tree/" + branch
 
         query_template = "https://{knot}/{did}/{repo_name}/tree/{branch}"
         api_query = query_template.format(knot=knot, did=did, repo_name=repo_name, branch=branch)
@@ -199,8 +204,16 @@ async def find_lexicons(url: str, forge_type: Literal["github", "gitea", "tangle
                 else:
                     get_tangled_dir(base_query, path + "/" + entry["name"])
         get_tangled_dir(api_query, base_path)
-        return out
 
+    elif forge_type == "pds":
+        async for rec in atproto_utils.list_records(at_url(url, "com.atproto.lexicon.schema")):
+            if lex_entry := check_lex(rec_value(rec)):
+                out[lex_entry["nsid"]] = {
+                    "web_url": "https://pdsls.dev/" + rec.uri,
+                    **lex_entry
+                }
+
+    return out
 async def main():
     log.debug('starting main')
     g = ATPTGrister(False)
@@ -220,7 +233,7 @@ async def main():
         if not forge_type or not url:
             continue
 
-        for found_nsid, entry in (await find_lexicons(url, forge_type, nsids)).items():
+        for found_nsid, entry in (await find_lexicons(url, forge_type)).items():
             # sometimes people put other people's lexicons in their domains. we want to make sure they get filed properly (by domain ownership)
             split_found_nsid = found_nsid.split(".")
             split_found_domain = split_found_nsid[:2]

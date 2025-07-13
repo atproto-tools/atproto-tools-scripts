@@ -478,6 +478,7 @@ value:
   unusedInlineScripts: []
 custom_path: submit
 policy:
+  allowed_s3_keys: null
   execution_mode: anonymous
   s3_inputs: []
   triggerables_v2:

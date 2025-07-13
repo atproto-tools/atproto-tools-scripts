@@ -68,7 +68,7 @@ def main(lex_limit: int | None = 16):
                 "title": "Lexicon",
                 "default": None,
                 "Noneable": True,
-                "enumLabels": {i: lex_name for i, (lex_name, _) in enumerate(lexicons)},
+                "enumLabels": {id: lex_name for (lex_name, id) in lexicons},
                 "enum": [i[1] for i in lexicons],
                 "description": "",
                 "disableCreate": True

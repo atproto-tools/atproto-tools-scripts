@@ -214,6 +214,7 @@ async def find_lexicons(url: str, forge_type: forge) -> dict[str, lex_record]:
                 }
 
     return out
+
 async def main():
     log.debug('starting main')
     g = ATPTGrister(False)
@@ -277,8 +278,3 @@ async def main():
         ]
         g.add_update_records("Tags_lexicon_record_types", out)
         return diffs
-
-if __name__ == "__main__":
-    import asyncio
-    import pprint
-    pprint.pp(asyncio.run(main()))

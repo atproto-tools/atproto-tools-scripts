@@ -611,6 +611,7 @@ value:
   unusedInlineScripts: []
 custom_path: internal_form
 policy:
+  allowed_s3_keys: null
   execution_mode: publisher
   s3_inputs: []
   triggerables_v2:

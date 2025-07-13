@@ -200,7 +200,7 @@ async def find_lexicons(url: str, forge_type: forge) -> dict[str, lex_record]:
                                     **check_result
                                 }
                             else:
-                                raise ValueError(f"found duplicate entry at path {base_query + file_data["path"]} for nsid {nsid}")
+                                raise ValueError(f"found duplicate entry at path {base_query + file_data['path']} for nsid {nsid}")
                 else:
                     get_tangled_dir(base_query, path + "/" + entry["name"])
         get_tangled_dir(api_query, base_path)

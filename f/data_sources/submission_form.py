@@ -1,7 +1,7 @@
 import wmill
 from f.main.Collector import Collector, t, kf, ef, normalize_url
 from f.main.boilerplate import get_timed_logger, dict_filter_falsy
-log = get_timed_logger("submission form")
+log = get_timed_logger(__name__)
 
 #longterm ask about other sanitization? idk what the risks are
 def clean_url(url: str) -> kf:

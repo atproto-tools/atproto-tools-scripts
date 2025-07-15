@@ -1,4 +1,4 @@
-# py313
+import asyncio
 from enum import StrEnum
 import re
 from typing import Iterable, Any, cast
@@ -61,9 +61,9 @@ class Collector:
         source_record = next(i for i in sources if i["source_name"] == source_name)
         self.last_update_timestamp: int = source_record.get("last_update_timestamp") or 0
         self.current_update_timestamp: int = 0
-        # if source_feed := source_record.get("feed"):
-        #     #TODO fix type annotations in feedparser upstream
-        #     self.check_update_timestamp(feedparser.parse(source_feed).feed.updated) #type: ignore
+        if source_feed := source_record.get("feed"):
+            #TODO fix type annotations in feedparser upstream
+            self.check_update_timestamp(feedparser.parse(source_feed).feed.updated) #type: ignore
         self._source_id = source_record["id"]
         self._source_label = source_record["label"]
         self._fields: list[str] = [self._prefix + i for i in fields]
@@ -318,7 +318,7 @@ class Collector:
             self.g.add_update_records(table_id, out)
             return [rec[gf.KEY] | rec[gf.FIELDS] for rec in out]
 
-    def output(self, display_fields: list[str] = [], dry_run: bool = False) -> dict[str, list[Any]]:
+    async def _output(self, display_fields: list[str] = [], dry_run: bool = False) -> dict[str, list[Any]]:
         """write to the grist db and make a pretty json object for output into windmill.
         Args:
             display_fields (list[str], optional): fields to display in output. values can be "url" and the keys of self._field_key. Defaults the order fields were given in the constructor, with tags and url added in last. Fields starting with _ are hidden by default.
@@ -328,8 +328,6 @@ class Collector:
         """
         self.display_fields = display_fields or self.display_fields
 
-
-        
         if self._tags_set or self._tags_key:
             og_tags = {}
             if not self._tags_key:
@@ -384,6 +382,7 @@ class Collector:
             self.g.add_update_cols(t.SITES, cols_tables, noupdate=True)
             log.debug(f"wrote cols {[col['id'] for col in cols_tables]}")
 
+
         for url, entry in self.new_sites.items():
             if new_meta := check_and_fetch(self.sites.get(url) or entry, 14):
                 entry[names_col] = new_meta
@@ -396,7 +395,7 @@ class Collector:
             #TODO these can run in parallel
             from f.main.get_repos_data import fetch_repo_data
             from f.main.get_authors_data import fetch_authors
-            repos_metadata = fetch_repo_data(
+            repos_metadata_coro = fetch_repo_data(
                 self.g,
                 list(
                     url
@@ -404,6 +403,13 @@ class Collector:
                     if check_stale(self.repos.get(url, {}).get(mf.POLLED))
                 ),
             )
+            authors_metadata_coro = fetch_authors(
+                did
+                for did in self.new_authors.keys()
+                if check_stale(self.authors[did].get(mf.POLLED))
+            )
+            repos_metadata, authors_metadata = await asyncio.gather(repos_metadata_coro, authors_metadata_coro)
+
             for url, fields in repos_metadata.items():
                 if (homepage := fields.get('homepageUrl')) and url in self.sites:
                     old_hyperlink = f"https://atproto-tools.getgrist.com/p2SiVPSGqbi8/main-list/p/9#a1.s27.r{self.sites[url]['id']}"
@@ -414,11 +420,6 @@ class Collector:
 
                 self.new_repos[url] |= fields
             
-            authors_metadata = fetch_authors(
-                did
-                for did in self.new_authors.keys()
-                if check_stale(self.authors[did].get(mf.POLLED))
-            )
             for did, fields in authors_metadata.items():
                 self.new_authors[did] |= fields
 
@@ -449,6 +450,9 @@ class Collector:
             {"table-row-object": repos},
             {"table-row-object": authors}
         ]}
+
+    def output(self, display_fields: list[str] = [], dry_run: bool = False) -> dict[str, list[Any]]:
+        return asyncio.run(self._output(display_fields, dry_run))
 
 if __name__ == "__main__":
     c = Collector("Official_showcase")

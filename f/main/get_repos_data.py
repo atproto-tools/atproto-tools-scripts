@@ -2,15 +2,16 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, Iterable
 from urllib.parse import urlparse, urlunparse
-import trio
-import wmill
+import asyncio
+import httpx
 import pprint
 import re
-from f.main.ATPTGrister import ATPTGrister, CustomGrister, make_timestamp, t, kf, gf, mf, check_stale
+from f.main.ATPTGrister import ATPTGrister, CustomGrister, make_timestamp, t, kf, mf, check_stale
 from at_url_converter import lex, url_obj, at_url, atproto_utils
-from f.main.boilerplate import batched, dicts_diff, get_timed_logger
+from f.main.boilerplate import batched, dicts_diff, error_with_type, get_timed_logger
 from operator import itemgetter as getter
-from httpx import Client
+from httpx import AsyncClient
+from github_client import gh_client, gh_graphql
 from atproto.exceptions import AtProtocolError
 from constellation import all_links as constellation_links
 
@@ -45,7 +46,7 @@ ref_field_names = {
     rt.LANGUAGES: "language"
 }
 
-c = Client()
+c = AsyncClient(timeout=30, follow_redirects=True)
 
 async def get_tangled_rec(url: str):
     u = url_obj(url)
@@ -57,7 +58,7 @@ async def get_tangled_rec(url: str):
         raise StopIteration(f"could not find tangled repo named {repo_name} in {metadata_repo}")
     return matched_rec
 
-async def get_tangled_repo_meta(url):
+async def get_tangled_repo_meta(url: str):
     u = url_obj(url)
     log.debug(f"fetching metadata for repo {url}")
     match u:
@@ -72,40 +73,42 @@ async def get_tangled_repo_meta(url):
                 repo_url = at_url.from_str(repo_rec.uri)
                 repo_knot = repo_rec.value["knot"]
             except (StopIteration, AtProtocolError) as e:
-                log.error("e")
+                log.error(error_with_type(e))
                 return None
 
             links = await constellation_links(repo_url)
             def get_from_links(collection, path) -> int | None:
                 return links.get(collection, {}).get(path, {}).get("records")
             url = f"https://{repo_knot}/{did}/{repo_name}"
-            print(url)
-            print(c.get(url).json().get("readme"))
-            out = {
+            
+            out: dict[str, Any] = {
                 "forkCount": get_from_links(lex.tangled.repo, ".source"),
                 "stargazerCount": get_from_links(lex.tangled.star, ".subject"),
                 "pullRequests": get_from_links(lex.tangled.pull, ".targetRepo"),
                 "issues": get_from_links(lex.tangled.issue, ".repo"),
                 
             }
+            try:
+                r = await c.get(url)
+                r.raise_for_status()
+                if readme := r.json().get("readme"):
+                    if readme_header := extract_readme_header(readme):
+                        out["readme_header"] = readme_header
+            except httpx.HTTPError as e:
+                log.error(f"could not fetch readme from {url}:\n{error_with_type(e)}")
             if rest and rest[0] == "tree":
                 rest = rest[1:]
                 raise NotImplementedError # TODO tangled subdir meta
             return out
 
-import asyncio
-pprint.pp(
-    asyncio.run(get_tangled_repo_meta("https://tangled.sh/@tangled.sh/core"))
-)
-
-def extract_readme_header(text: str):
+def extract_readme_header(text: str) -> str | None:
     # judgement call, sometimes people put meta stuff in the first few lines before the header
     lines: list[str] = text.splitlines()[:5]
     for line in lines:
         if readme_heading := re.match(r"^##? (.*)", line):
             return readme_heading[1]
 
-fragment = """
+fragment_def = """
 fragment repoProperties on Repository {
   homepageUrl
   description
@@ -178,10 +181,7 @@ template = (
 )
 
 rate_limit_info = "rateLimit {cost remaining resetAt}"
-headers = {
-    "Authorization": f"Bearer {wmill.get_variable('u/autumn/github_key')}",
-    "Content-Type": "application/json",
-}
+
 poll_timestamp = int(datetime.today().timestamp())
 
 async def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[kf], old_records: dict[kf, dict[str, Any]] = {}) -> dict[kf, dict[str, Any]]:
@@ -233,7 +233,7 @@ async def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[kf], old_records
         "issues": getter("open_issues_count"),  # GitHub has this nested under issues with state OPEN
         "pullRequests": getter("open_pr_counter"),  # GitHub has this nested under pullRequests with state OPEN
         #TODO for now we just make a gross assumption that github language names map neatly to gitea names, but we should really verify
-        ref_field_names[rt.LANGUAGES]: lambda x: add_refs(x, rt.LANGUAGES, x.get("languages")),
+        ref_field_names[rt.LANGUAGES]: lambda x: add_refs(x, rt.LANGUAGES, x.get("language")),
 
         # Topics
         # "topics": "topics",  # GitHub has this nested under nodes. #TODO idk how to handle mapping them onto github topics
@@ -250,27 +250,27 @@ async def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[kf], old_records
     ]
     for i in gitea_urls:
         endpoint = urlunparse(i._replace(path="/api/v1/repos" + i.path))
-        resp = c.get(endpoint)
+        url = urlunparse(i)
+        resp = await c.get(endpoint)
         resp.raise_for_status()
         r_json = resp.json()
         out = {mf.POLLED: poll_timestamp}
         for grist_field, field_getter in gitea_field_key.items():
             if (val := field_getter(r_json)) is not None: # 0 is a valid value
-                out[grist_field] = val 
-        records[urlunparse(i)] = out
+                out[grist_field] = val
+        log.debug(f"got data for {url}")
+        records[url] = out
+
 
     tangled_urls = [  #TODO also add readme.md fetching/parsing
-        urlparse(url)
+        url
         for url in repo_urls
         if old_records.get(url, {}).get(forge_type_col) == forges.TANGLED
     ]
     for url in tangled_urls:
-        out = {
-            mf.POLLED: poll_timestamp,
-        }
         if meta := await get_tangled_repo_meta(url):
-            out |= meta
-
+            records[url] = meta | { mf.POLLED: poll_timestamp }
+            log.debug(f"got data for {url}")
 
     github_urls: list[tuple[str, str]] = [
         (rmatch[1], rmatch[2])
@@ -279,21 +279,18 @@ async def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[kf], old_records
     ]
     github_responses: dict[str, dict[str, Any]] = {}
     batch_size = 32
-    # 100 is the stated limit, but it still timed out server-side a fair bit. experimentally 64 seems to work better.
-    # 32 when fetching readmes
+    # 100 is the stated limit in the docs, but it still timed out server-side a fair bit. experimentally 64 seems to work better.
+    # 32 when also fetching readme files
     for num_req, batch in enumerate(batched(github_urls, batch_size)): 
         repos_query_batch = "\n".join(
             template.format(id="r" + str(num_req * batch_size + i), owner=owner, repo=repo)
             for i, (owner, repo) in enumerate(batch)
         )
-        query = f"{fragment} {{{repos_query_batch} {rate_limit_info}}}"
-        response = c.post(
-            "https://api.github.com/graphql", json={"query": query}, headers=headers
-        )
+        response = gh_graphql(f"{fragment_def} {{{repos_query_batch} {rate_limit_info}}}")
         data = response.json()["data"]
-        pprint.pp(data.pop("rateLimit"))
+        log.debug(pprint.pformat(data.pop("rateLimit")))
         if errors := data.pop("errors", None):
-            pprint.pp(errors)
+            log.error(pprint.pformat(errors))
         github_responses |= data
 
     for (owner, repo), resp in zip(github_urls, github_responses.values()):
@@ -350,17 +347,26 @@ async def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[kf], old_records
                     case "readme" | "README":
                         if v and (text := v["text"]):
                             out["readme_header"] = extract_readme_header(text)
-            contribs_count = 0
-            contribs_query = f"https://api.github.com/repos/{owner}/{repo}/contributors?per_page=100"
-            while True:
-                contribs_resp = c.get(contribs_query, headers=headers)
-                contribs_data = contribs_resp.json() # for debugging
+            # https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28#list-repository-contributors
+            contribs = f"https://api.github.com/repos/{owner}/{repo}/contributors?per_page=100"
+            contribs_resp = gh_client.get(contribs)
+            contribs_data = contribs_resp.json()
+            contribs_count: int | None = None
+            if (link := contribs_resp.headers.get("link")) and (last_link_match := re.search(r'<([^\s]*?)>; rel="last"', link)):
+                contribs_last_page = last_link_match[1]
+                page_count = url_obj(contribs_last_page).find_query_param("page")
+                if not page_count:
+                    raise ValueError(f"last page count param not found in link {contribs_last_page}")
+                contribs_count = (int(page_count) - 1) * 100
+                contribs_resp = gh_client.get(contribs_last_page)
+                contribs_data = contribs_resp.json()
                 contribs_count += len(contribs_data)
-                if (link := contribs_resp.headers.get("link")) and (last_link_match := re.search(r'<(.*?)>; rel="last"', link)):
-                    contribs_query = last_link_match[1]
-                else:
-                    break
-            out["contributors"] = contribs_count or None
+            else:
+                contribs_count = len(contribs_data)
+            if contribs_count is not None:
+                if contribs_count == 0:
+                    raise ValueError(f"found 0 contributors for the extant repo https://github.com/{owner}/{repo}")
+                out["contributors"] = contribs_count
         else:
             out[mf.STATUS] = "not found"
         records[url] = out
@@ -387,7 +393,7 @@ async def fetch_repo_data(g: CustomGrister, repo_urls: Iterable[kf], old_records
     return records
 
 
-async def update_all_repos(g: CustomGrister | None = None, include_inactive: bool = True):
+async def update_all_repos(g: CustomGrister | None = None, include_inactive: bool = True, stale_threshold = 2):
     g = g or ATPTGrister(fetch_authors=True)
     #TODO convert to sql query
     old_records_dict = {rec[kf.NORMAL_URL]: rec for rec in g.list_records("Repos")[1]}
@@ -397,7 +403,7 @@ async def update_all_repos(g: CustomGrister | None = None, include_inactive: boo
         if (
             # TODO if we start to get a large fraction of archived/deleted repos, move checking those to a separate (less frequent) job
             (include_inactive or not i.get(mf.STATUS)) and
-            check_stale(i.get(mf.POLLED))
+            check_stale(i.get(mf.POLLED), stale_threshold)
         )
     ]
     if repo_data := await fetch_repo_data(g, urls, old_records_dict):
@@ -406,15 +412,13 @@ async def update_all_repos(g: CustomGrister | None = None, include_inactive: boo
             for url, rec in repo_data.items()
             if (diff := dicts_diff(old_records_dict[url], rec))
         }
-        records = [
-            {gf.KEY: {kf.NORMAL_URL: url}, gf.FIELDS: diff}
-            for url, diff in diffs.items()
-        ]
-        if records:
+        if records := g.format_records(diffs, kf.NORMAL_URL):
             g.add_update_records(t.REPOS, records)
 
-def main():
-    trio.run(update_all_repos)
+def main(include_inactive: bool = True, stale_threshold = 2):
+    asyncio.run(update_all_repos(include_inactive=include_inactive, stale_threshold=stale_threshold))
 
 if __name__ == "__main__":
-    main()
+    import logging
+    logging.basicConfig(level=logging.DEBUG)
+    main(stale_threshold=0)

@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from f.main.boilerplate import add_missing, get_timed_logger
 utc = ZoneInfo("UTC")
 resolver = IdResolver()
-log = get_timed_logger(__name__, 'debug')
+log = get_timed_logger(__name__)
 
 class t(StrEnum):
     """atproto-tools table names"""
@@ -171,7 +171,7 @@ class CustomGrister(GristApi):
                 }
                 for rec in merged_authors
             ]
-            merged_authors += self.make_records(invalid_dids, kf.ID)
+            merged_authors += self.format_records(invalid_dids, kf.ID)
             pp(merged_authors)
             # for i in merged_authors:
             #     log.debug(f'POSTing {i[gf.KEY]}')
@@ -179,7 +179,7 @@ class CustomGrister(GristApi):
             #     self.add_update_records(t.AUTHORS, [i])
             self.add_update_records(t.AUTHORS, merged_authors)
 
-    def make_records(self, entries: dict[kf, dict[str, Any]], rec_key: str):
+    def format_records(self, entries: dict[kf, dict[str, Any]], rec_key: str):
         return [
             {
                 gf.KEY: {rec_key: entry.get(rec_key) or key},

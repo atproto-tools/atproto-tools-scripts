@@ -10,7 +10,8 @@ log = get_timed_logger(__name__)
 
 # https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28#about-secondary-rate-limits
 class GitHubRateLimitRetryTransport(httpx.BaseTransport): # thank u claude
-    def __init__(self, cooldown: float = 0):
+    # https://docs.github.com/en/graphql/overview/rate-limits-and-node-limits-for-the-graphql-api#staying-under-the-rate-limit
+    def __init__(self, cooldown: float = 1):
         self.main_transport = httpx.HTTPTransport()
         self.cooldown = cooldown  # hopefully the cooldown lets us avoid hitting rate limit?
         self.last_request_time = 0
@@ -47,13 +48,18 @@ class GitHubRateLimitRetryTransport(httpx.BaseTransport): # thank u claude
             # If we get here, either we're not rate limited or we've waited and should return the response
             return response
 
-gh = httpx.Client(
+gh_client = httpx.Client(
     headers={
         "Authorization": f"Bearer {wmill.get_variable('u/autumn/github_key')}",
         "Content-Type": "application/json",
     },
-    transport=GitHubRateLimitRetryTransport()
+    transport=GitHubRateLimitRetryTransport(),
+    timeout = 30,
+    follow_redirects=True
 )
+
+def gh_graphql(query: str):
+    return gh_client.post("https://api.github.com/graphql", json={"query": query})
 
 rate_limit_info = "rateLimit {cost remaining resetAt}"
 
@@ -85,7 +91,7 @@ def get_repo_files(url: str, paths: list[str], batch_size = 32) -> dict[str, str
         query = outer_template.substitute(owner=owner, repo=repo, lines=lines, rate_limit_info=rate_limit_info)
 
         log.debug(f'sending github query {query}')
-        response = gh.post(
+        response = gh_client.post(
             "https://api.github.com/graphql", json={"query": query}
         )
 

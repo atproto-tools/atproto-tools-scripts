@@ -7,7 +7,7 @@ from atproto_core.nsid import validate_nsid as _validate_nsid
 from atproto_client.models.string_formats import Did, Nsid, RecordKey
 
 CONSTELLATION_URL = os.environ.get("CONSTELLATION_URL", "https://constellation.microcosm.blue")
-c = Client(headers={"Accept": "application/json"}, base_url=CONSTELLATION_URL)
+c = Client(headers={"Accept": "application/json"}, base_url=CONSTELLATION_URL, timeout=30, follow_redirects=True)
 
 def validate_nsid(value: str):
     _validate_nsid(value)
@@ -82,13 +82,13 @@ class LinksResponse(TypedDict):
 
 async def links(query: constellation_query, item_limit=0, req_limit=0) -> AsyncIterable[LinksResponse]:
     """links to a target from a specific collection and path"""
-    return PaginatedLinks(c.build_request("get", "links", params=query.model_dump()), item_limit=item_limit, req_limit=req_limit)
+    return PaginatedLinks(c.build_request("get", "links", params=query.model_dump()), item_limit, req_limit)
 
 async def distinct_dids(query: constellation_query, item_limit=0, req_limit=0) -> AsyncIterable[Did]:
     """distinct DIDs (identities) with links to a target"""
-    return PaginatedLinks(c.build_request("get", "links/distinct-dids", params=query.model_dump()), item_limit=item_limit, req_limit=req_limit)
+    return PaginatedLinks(c.build_request("get", "links/distinct-dids", params=query.model_dump()), item_limit,req_limit)
 
-async def count(query: constellation_query) -> int:
+async def link_count(query: constellation_query) -> int:
     """total number of links pointing at a given target."""
     return c.get("links/count", params=query.model_dump()).json()["total"]
 
@@ -108,5 +108,5 @@ class path_info(TypedDict):
 async def all_links(url: str | at_url, item_limit=0, req_limit=0) -> dict[Nsid, dict[path_str, path_info]]:
     """All links to a target, including linking record counts and distinct linking DIDs"""
     r = c.get("links/all", params={"target": str(url)})
-    j =r.json()
+    j = r.json()
     return j["links"]

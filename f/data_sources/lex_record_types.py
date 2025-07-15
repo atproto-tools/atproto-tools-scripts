@@ -1,13 +1,14 @@
 # ruff: noqa: E402 
+import asyncio
 from typing import Any, Literal, Optional, TypedDict, cast
 from atproto_client.exceptions import AtProtocolError
 from pydantic import ValidationError
 from f.main.boilerplate import get_timed_logger, dicts_diff
-log = get_timed_logger(__name__, 'info')
+log = get_timed_logger(__name__)
 import re
 import json
-from f.main.ATPTGrister import ATPTGrister, gf
-from f.main.github_client import gh, get_repo_files
+from f.main.ATPTGrister import ATPTGrister
+from f.main.github_client import gh_client, get_repo_files
 from atproto_lexicon.parser import lexicon_parse
 import dns.resolver
 from atproto_client import Client as atproto_client
@@ -47,10 +48,12 @@ github_url_regex = re.compile( #TIL about implicit string concatenation
     r'github\.com/'
     r'(?P<owner>[^/]+)/'
     r'(?P<repo>[^/]+)/'
-    r'tree/'
+    r'(?:tree|blob)/'
     r'(?P<branch>[^/]+)/?'
-    r'(?P<path>.*)?'
+    r'(?P<path>.*)?/?'
 )
+
+
 github_template = "https://github.com/{0}/{1}/tree/{2}/{3}"
 
 log.debug('finished imports')
@@ -142,7 +145,7 @@ async def find_lexicons(url: str, forge_type: forge) -> dict[str, lex_record]:
         query = lex_search_template.format(owner=owner, repo=repo_name, search_path=search_path)
         while query:
             log.debug(f'requesting url\n{query}')
-            r = gh.get(query)
+            r = gh_client.get(query)
             data = r.json()
             paths += [item['path'] for item in data ['items']]
             query = r.links.get('next', {}).get('url')
@@ -215,14 +218,13 @@ async def find_lexicons(url: str, forge_type: forge) -> dict[str, lex_record]:
 
     return out
 
-async def main():
-    log.debug('starting main')
+async def _main():
     g = ATPTGrister(False)
     #blocked this is a dirty hack because we have no way atm to tell current from outdated lexicons so we put the more 'authoritative' (bsky.app) repo first
-    log.debug('fetched records')
     seen = {}
     diffs = {}
     lex_domains: dict[str, dict[str, Any]] = {rec['domain']: rec for rec in g.list_records("Lexicons", sort='manualSort')[1]}
+    log.debug('fetched records')
     nsids: dict[str, dict[str, Any]] = {
         rec["nsid"]: rec
         for rec in g.list_records("Tags_lexicon_record_types", sort="manualSort")[1]
@@ -269,12 +271,13 @@ async def main():
         log.warning(f"did not see lexicons (deprecated?):\n{unseen}")
 
     if diffs:
-        out = [
-            {
-                gf.KEY: {"nsid": nsid},
-                gf.FIELDS: entry,
-            }
-            for nsid, entry in diffs.items()
-        ]
+        out = g.format_records(diffs, "nsid")
         g.add_update_records("Tags_lexicon_record_types", out)
         return diffs
+
+def main():
+    return asyncio.run(_main())
+
+if __name__ == "__main__":
+    import pprint
+    pprint.pp(main())

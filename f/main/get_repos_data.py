@@ -15,7 +15,7 @@ from github_client import gh_client, gh_graphql
 from atproto.exceptions import AtProtocolError
 from constellation import all_links as constellation_links
 
-log = get_timed_logger(__file__)
+log = get_timed_logger(__name__)
 log.debug("finished imports")
 
 forge_type_col = "forge_type"

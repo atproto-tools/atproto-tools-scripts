@@ -74,7 +74,7 @@ def get_timed_logger(name: str = "", level: str | int | None = None) -> TimedLog
     logger.addHandler(handler)
     return TimedLoggerAdapter(logger)
 
-log = get_timed_logger(__file__)
+log = get_timed_logger(__name__)
 
 def error_with_type(e: BaseException):
     return ": ".join((e.__class__.__name__, str(e)))
@@ -186,3 +186,7 @@ def dicts_diff(source: Mapping[Any, Any], dest: Mapping[Any, Any], excluded_keys
     if diff:
         log.debug(f"returning {diff}")
     return diff
+
+def main():
+    log.debug("test debug message")
+    return "sent debug message!"
